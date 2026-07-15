@@ -12,4 +12,6 @@ from django.urls import include, path
 urlpatterns = [
     path("", include("apps.users.api.urls")),
     path("", include("apps.configuration.api.urls")),
+    path("", include("apps.verification.api.urls")),
+    path("", include("apps.matchmaking.api.urls")),
 ]

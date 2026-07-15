@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -26,6 +26,8 @@ class ConfigView(APIView):
         super().__init__(**kwargs)
         self._config = ConfigurationService()
 
-    @extend_schema(responses=dict, description="Get complete runtime configuration.")
+    @extend_schema(
+        responses=OpenApiResponse(description="Complete runtime configuration.")
+    )
     def get(self, request: Request) -> Response:
         return Response(self._config.get_runtime_config())

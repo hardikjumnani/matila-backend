@@ -91,14 +91,13 @@ class RevealService:
 
     # -- Intent -------------------------------------------------------------
 
-    def submit_intent(
-        self,
-        *,
-        chat_id: str,
-        user: User,
-        trigger_type: RevealTriggerType | str = RevealTriggerType.MANUAL,
-    ) -> ServiceResult[dict]:
-        """Record a participant's independent reveal intent (idempotent)."""
+    def submit_intent(self, *, chat_id: str, user: User) -> ServiceResult[dict]:
+        """Record a participant's independent reveal intent (idempotent).
+
+        The trigger type is derived server-side: CHAT_EXPIRED when the reveal is
+        initiated on an already-expired chat, MANUAL otherwise. It is never
+        supplied by the client.
+        """
         if not self._config.is_feature_enabled(FeatureFlagKey.REVEAL_ENABLED):
             return ServiceResult.fail("FORBIDDEN", "Reveal is currently disabled.")
 
@@ -116,6 +115,11 @@ class RevealService:
                 "VALIDATION_ERROR", "Reveal is not yet available for this chat."
             )
 
+        trigger_type = (
+            RevealTriggerType.CHAT_EXPIRED
+            if chat.status == ChatStatus.EXPIRED
+            else RevealTriggerType.MANUAL
+        )
         with transaction.atomic():
             intent, created = RevealIntent.objects.select_for_update().get_or_create(
                 chat=chat,

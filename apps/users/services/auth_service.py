@@ -116,14 +116,12 @@ class AuthService:
             return NextAction.SUBMIT_VERIFICATION
 
         # PENDING: distinguish "not yet submitted" from "awaiting review" by
-        # whether a verification request has actually been submitted.
-        # NOTE: Step 5 routes this through VerificationService; the direct read
-        # here keeps Step 4 self-contained.
-        from apps.verification.models import VerificationRequest
+        # delegating to VerificationService (which owns verification_requests).
+        from apps.verification.services.verification_service import (
+            VerificationService,
+        )
 
-        has_submitted = VerificationRequest.objects.filter(
-            user=user, submitted_at__isnull=False
-        ).exists()
+        has_submitted = VerificationService().has_submitted_request(user)
         return (
             NextAction.WAIT_FOR_VERIFICATION
             if has_submitted

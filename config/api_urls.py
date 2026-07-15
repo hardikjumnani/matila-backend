@@ -14,4 +14,6 @@ urlpatterns = [
     path("", include("apps.configuration.api.urls")),
     path("", include("apps.verification.api.urls")),
     path("", include("apps.matchmaking.api.urls")),
+    path("", include("apps.chats.api.urls")),
+    path("", include("apps.messaging.api.urls")),
 ]

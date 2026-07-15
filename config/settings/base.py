@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import dj_database_url
+from celery.schedules import crontab
 from decouple import Csv, config
 
 # ---------------------------------------------------------------------------
@@ -355,6 +356,27 @@ CELERY_TASK_SOFT_TIME_LIMIT = config(
 )
 # Keep workers connecting through a broker restart (common during deploys).
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# Scheduled (Celery Beat) tasks. Asynchronous tasks (push delivery) are enqueued
+# on demand and are not listed here.
+CELERY_BEAT_SCHEDULE = {
+    "expire-chats": {
+        "task": "apps.chats.tasks.expire_chats",
+        "schedule": 300.0,  # every 5 minutes
+    },
+    "cleanup-expired-media": {
+        "task": "apps.messaging.tasks.cleanup_expired_media",
+        "schedule": crontab(hour=2, minute=0),  # daily at 02:00 UTC
+    },
+    "cleanup-stale-match-queue": {
+        "task": "apps.matchmaking.tasks.cleanup_stale_match_queue",
+        "schedule": 120.0,  # every 2 minutes
+    },
+    "refresh-configuration-cache": {
+        "task": "apps.configuration.tasks.refresh_configuration_cache",
+        "schedule": 600.0,  # every 10 minutes
+    },
+}
 
 
 # ---------------------------------------------------------------------------

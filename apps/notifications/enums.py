@@ -17,3 +17,8 @@ class NotificationPriority(models.TextChoices):
     NORMAL = "NORMAL", "Normal"
     HIGH = "HIGH", "High"
     CRITICAL = "CRITICAL", "Critical"
+
+
+class DevicePlatform(models.TextChoices):
+    ANDROID = "ANDROID", "Android"
+    IOS = "IOS", "iOS"

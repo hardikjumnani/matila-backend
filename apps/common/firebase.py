@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 import firebase_admin
 from django.conf import settings
-from firebase_admin import auth, credentials
+from firebase_admin import auth, credentials, messaging
 
 logger = logging.getLogger(__name__)
 
@@ -76,3 +77,55 @@ def verify_id_token(token: str) -> dict[str, Any]:
         # not a server error. The token itself is never logged.
         logger.debug("Firebase token verification failed: %s", exc)
         raise InvalidFirebaseToken("Firebase token verification failed.") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class PushResult:
+    """Outcome of a multicast push, with tokens FCM reported as dead."""
+
+    success_count: int
+    failure_count: int
+    invalid_tokens: list[str]
+
+
+# FCM errors that mean a token is permanently dead and should be deactivated.
+_DEAD_TOKEN_ERRORS = (
+    messaging.UnregisteredError,
+    messaging.SenderIdMismatchError,
+)
+
+
+def send_push(
+    tokens: list[str],
+    *,
+    title: str,
+    body: str,
+    data: dict[str, str] | None = None,
+) -> PushResult:
+    """Send a notification to many device tokens via FCM (HTTP v1).
+
+    Returns per-batch success/failure counts and the subset of tokens FCM
+    reported as invalid/unregistered so the caller can deactivate them. Never
+    used with the deprecated legacy server key — this is the Admin SDK path.
+    """
+    if not tokens:
+        return PushResult(success_count=0, failure_count=0, invalid_tokens=[])
+
+    message = messaging.MulticastMessage(
+        tokens=tokens,
+        notification=messaging.Notification(title=title, body=body),
+        # FCM data values must be strings.
+        data={key: str(value) for key, value in (data or {}).items()},
+    )
+    response = messaging.send_each_for_multicast(message, app=_get_app())
+
+    invalid_tokens: list[str] = []
+    for token, result in zip(tokens, response.responses, strict=False):
+        if not result.success and isinstance(result.exception, _DEAD_TOKEN_ERRORS):
+            invalid_tokens.append(token)
+
+    return PushResult(
+        success_count=response.success_count,
+        failure_count=response.failure_count,
+        invalid_tokens=invalid_tokens,
+    )

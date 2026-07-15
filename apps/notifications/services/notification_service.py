@@ -17,6 +17,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
 
@@ -43,8 +44,13 @@ class NotificationService:
         priority: NotificationPriority | str = NotificationPriority.NORMAL,
         metadata: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
+        push: bool = True,
     ) -> Notification:
-        """Create an in-app notification (delivery is enqueued in Step 8)."""
+        """Create an in-app notification and (optionally) enqueue FCM delivery.
+
+        Delivery is enqueued only after the surrounding transaction commits, so
+        the worker never races ahead of a row that might roll back.
+        """
         notification = Notification.objects.create(
             user=user,
             type=type,
@@ -62,7 +68,25 @@ class NotificationService:
             user.id,
             type,
         )
+        if push:
+            self._enqueue_push(str(notification.id))
         return notification
+
+    def _enqueue_push(self, notification_id: str) -> None:
+        """Enqueue FCM delivery after commit; best-effort (never blocks creation)."""
+
+        def _dispatch() -> None:
+            try:
+                from apps.notifications.tasks import send_push_notification
+
+                send_push_notification.delay(notification_id)
+            except Exception as exc:  # noqa: BLE001 — broker down must not break.
+                # The PENDING push_status lets a future sweep retry delivery.
+                logger.warning(
+                    "Could not enqueue push for %s: %s", notification_id, exc
+                )
+
+        transaction.on_commit(_dispatch)
 
     def for_user(self, user: User) -> QuerySet[Notification]:
         """Return a user's non-expired notifications, newest first."""

@@ -1,0 +1,8 @@
+# ---------------------------------------------------------------------------
+# Production dependencies — extends the base set with the production WSGI
+# server. WebSocket traffic is served by Daphne (already in base.txt).
+# ---------------------------------------------------------------------------
+-r base.txt
+
+# Production HTTP (WSGI) server for the REST API
+gunicorn==23.0.0

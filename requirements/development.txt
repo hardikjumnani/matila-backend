@@ -1,0 +1,16 @@
+# ---------------------------------------------------------------------------
+# Development dependencies — local development, testing, linting.
+# Never installed in production images.
+# ---------------------------------------------------------------------------
+-r base.txt
+
+# Testing
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-asyncio==0.25.2
+pytest-cov==6.0.0
+factory-boy==3.3.1
+
+# Linting / formatting (enforces PEP8 + consistent formatting in CI)
+ruff==0.9.2
+black==24.10.0

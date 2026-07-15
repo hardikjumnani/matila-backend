@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Base dependencies — required in every environment (dev, staging, production).
+# Pinned to exact versions for reproducible builds. Upgrades are deliberate,
+# reviewed changes, never implicit.
+# ---------------------------------------------------------------------------
+
+# Core framework
+Django==5.1.5
+djangorestframework==3.15.2
+
+# Real-time / ASGI stack (Django Channels + Redis channel layer)
+channels==4.2.0
+channels-redis==4.2.1
+daphne==4.1.2
+
+# Asynchronous task processing
+celery==5.4.0
+redis==5.2.1
+
+# Database (PostgreSQL driver, psycopg 3)
+psycopg[binary]==3.2.3
+dj-database-url==2.3.0
+
+# Configuration / secrets management
+python-decouple==3.8
+
+# Authentication (Firebase Admin SDK — server-side token verification)
+firebase-admin==6.6.0
+
+# Object storage (AWS S3)
+boto3==1.35.90
+django-storages==1.14.4
+
+# Payments
+razorpay==1.4.2
+
+# Cross-origin support for the Flutter client
+django-cors-headers==4.6.0
+
+# API schema / documentation
+drf-spectacular==0.28.0

@@ -9,7 +9,23 @@ introduces no dependency cycle.
 
 from __future__ import annotations
 
+import enum
+
 from django.db import models
+
+
+class NextAction(str, enum.Enum):
+    """Navigation hint returned by session bootstrap to guide the Flutter client.
+
+    Not a database value — it is derived on the fly from the user's onboarding
+    and verification state, so it is a plain string enum rather than a model
+    ``TextChoices``.
+    """
+
+    COMPLETE_ONBOARDING = "COMPLETE_ONBOARDING"
+    SUBMIT_VERIFICATION = "SUBMIT_VERIFICATION"
+    WAIT_FOR_VERIFICATION = "WAIT_FOR_VERIFICATION"
+    GO_HOME = "GO_HOME"
 
 
 class Gender(models.TextChoices):

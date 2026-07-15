@@ -66,3 +66,15 @@ class User(TimeStampedUUIDModel):
 
     def __str__(self) -> str:
         return f"User<{self.id}> {self.college_email}"
+
+    # --- DRF / Channels compatibility --------------------------------------
+    # This is a Firebase-authenticated domain model, not a Django auth user, so
+    # it must expose the identity markers DRF permissions and Channels rely on.
+    # A resolved User instance always represents an authenticated identity.
+    @property
+    def is_authenticated(self) -> bool:
+        return True
+
+    @property
+    def is_anonymous(self) -> bool:
+        return False

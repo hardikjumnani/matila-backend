@@ -268,10 +268,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # generator is set now so documentation is available from the start.
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "apps.users.authentication.FirebaseAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # Anonymous requests resolve request.user to None (not a Django AnonymousUser)
+    # since application users are the Firebase-backed domain model.
     "UNAUTHENTICATED_USER": None,
 }
 

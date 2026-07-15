@@ -9,7 +9,7 @@ OpenAPI schema/documentation, and a health probe.
 from __future__ import annotations
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -33,5 +33,6 @@ urlpatterns = [
         SpectacularRedocView.as_view(url_name="schema"),
         name="redoc",
     ),
-    # Step 6: path("api/v1/", include("config.api_urls")),
+    # Versioned API surface (grows per module through Step 6).
+    path("api/v1/", include("config.api_urls")),
 ]

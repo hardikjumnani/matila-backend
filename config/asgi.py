@@ -27,14 +27,19 @@ django_asgi_app = get_asgi_application()
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E402
 
+from apps.users.channels_auth import FirebaseAuthMiddleware  # noqa: E402
 from config.routing import websocket_urlpatterns  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        # Step 4/7: wrap URLRouter with FirebaseAuthMiddleware here.
+        # WebSocket connections are authenticated with a Firebase token from the
+        # query string; the middleware populates scope["user"]. Chat routes and
+        # consumer-level connection rejection are added in Step 7.
         "websocket": AllowedHostsOriginValidator(
-            URLRouter(websocket_urlpatterns),
+            FirebaseAuthMiddleware(
+                URLRouter(websocket_urlpatterns),
+            ),
         ),
     }
 )

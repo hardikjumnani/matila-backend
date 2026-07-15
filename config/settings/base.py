@@ -6,9 +6,11 @@ everything from this module and override only what differs. Secrets and
 environment-dependent values are read through ``python-decouple`` so that no
 sensitive value is ever hard-coded in the codebase.
 
-Step 1 establishes a runnable skeleton. Step 2 (Environment & Configuration
-Setup) expands the integration-specific sections (Firebase, AWS S3, Razorpay,
-Celery, CORS/CSRF) that are intentionally left minimal here.
+This module holds configuration common to every environment: database, cache,
+channel layer, Celery, storage, and the external integrations (Firebase, AWS
+S3, Razorpay, CORS/CSRF). Credentials and endpoints are read from the
+environment; the settings themselves are safe to commit. Environment-specific
+hardening and overrides live in ``development`` and ``production``.
 """
 
 from __future__ import annotations
@@ -159,6 +161,30 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+# Redis is the cache backend for frequently accessed runtime configuration and
+# feature flags (ConfigurationService, Step 5). A local-memory fallback keeps
+# the cache API usable when REDIS_URL is unset; it is per-process and must not
+# be relied upon in production.
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "adc",  # Namespaces keys so cache/channel/broker DBs
+            # can safely share a Redis instance.
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
 # Authentication / password validation
 # ---------------------------------------------------------------------------
 # Password validators apply only to the Django admin (django.contrib.auth.User).
@@ -185,10 +211,51 @@ USE_TZ = True
 
 
 # ---------------------------------------------------------------------------
-# Static files
+# Static & media files / object storage
 # ---------------------------------------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# User-uploaded media (profile photos, college IDs, gesture selfies, chat
+# images) lives in AWS S3 in every real environment. All such media is PRIVATE:
+# access is granted through short-lived signed URLs, never public ACLs, because
+# verification documents and view-once images must not be world-readable.
+AWS_STORAGE_BUCKET_NAME: str = config("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_REGION_NAME: str = config("AWS_S3_REGION_NAME", default="")
+# Credentials are optional: on EC2/ECS the instance IAM role supplies them, and
+# leaving these blank lets boto3 use the role rather than static keys.
+AWS_ACCESS_KEY_ID: str = config("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY: str = config("AWS_SECRET_ACCESS_KEY", default="")
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+AWS_DEFAULT_ACL = None  # Never attach a public ACL to uploaded objects.
+AWS_S3_FILE_OVERWRITE = False  # Distinct keys; never clobber an existing object.
+AWS_QUERYSTRING_AUTH = True  # Serve private media via signed URLs.
+AWS_QUERYSTRING_EXPIRE = config("AWS_QUERYSTRING_EXPIRE", default=3600, cast=int)
+
+USE_S3: bool = bool(AWS_STORAGE_BUCKET_NAME)
+
+if USE_S3:
+    _default_storage = {"BACKEND": "storages.backends.s3.S3Storage"}
+else:
+    # Local filesystem fallback for development without S3 credentials.
+    _default_storage = {"BACKEND": "django.core.files.storage.FileSystemStorage"}
+    MEDIA_URL = "media/"
+    MEDIA_ROOT = BASE_DIR / "media"
+
+STORAGES = {
+    "default": _default_storage,
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+# Upload ceilings — reject oversized request bodies before they are buffered
+# into memory, as a first-line abuse/DoS guard on the image upload endpoints.
+# The per-media-type limits are enforced in the upload services (Step 5/6).
+DATA_UPLOAD_MAX_MEMORY_SIZE = config(
+    "DATA_UPLOAD_MAX_MEMORY_SIZE", default=10 * 1024 * 1024, cast=int  # 10 MB
+)
+FILE_UPLOAD_MAX_MEMORY_SIZE = DATA_UPLOAD_MAX_MEMORY_SIZE
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -251,3 +318,65 @@ LOGGING = {
         },
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+# Broker and result backend default to the shared Redis instance. Serialization
+# is JSON-only (never pickle) to avoid arbitrary code execution from task
+# payloads. The Beat schedule is defined in Step 8 (Background Jobs).
+CELERY_BROKER_URL: str = config(
+    "CELERY_BROKER_URL", default=REDIS_URL or "redis://localhost:6379/0"
+)
+CELERY_RESULT_BACKEND: str = config("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = "UTC"
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+# Hard/soft time limits bound runaway tasks; individual tasks may override.
+CELERY_TASK_TIME_LIMIT = config("CELERY_TASK_TIME_LIMIT", default=300, cast=int)
+CELERY_TASK_SOFT_TIME_LIMIT = config(
+    "CELERY_TASK_SOFT_TIME_LIMIT", default=270, cast=int
+)
+# Keep workers connecting through a broker restart (common during deploys).
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+
+# ---------------------------------------------------------------------------
+# Firebase Admin SDK
+# ---------------------------------------------------------------------------
+# Server-side verification of Firebase ID tokens and FCM HTTP v1 push delivery
+# both use the Firebase Admin SDK with a service-account credentials file. The
+# SDK is initialized in Step 4; this only records where the credentials live.
+#
+# NOTE: The legacy FCM server key (FCM_SERVER_KEY) is intentionally NOT used —
+# Google shut down the legacy FCM API in June 2024. Push notifications are sent
+# via firebase_admin.messaging using these same credentials.
+FIREBASE_CREDENTIALS_PATH: str = config("FIREBASE_CREDENTIALS_PATH", default="")
+
+
+# ---------------------------------------------------------------------------
+# Razorpay
+# ---------------------------------------------------------------------------
+# Payment order creation, client-side verification, and webhook signature
+# validation. The webhook secret is separate from the API key secret and is
+# configured in the Razorpay dashboard. Client initialization is in Step 5.
+RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID", default="")
+RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET", default="")
+RAZORPAY_WEBHOOK_SECRET: str = config("RAZORPAY_WEBHOOK_SECRET", default="")
+
+
+# ---------------------------------------------------------------------------
+# CORS / CSRF
+# ---------------------------------------------------------------------------
+# The Flutter client is a native app and does not rely on cookies, but explicit
+# origins are still configured for the browsable API, admin, and any web
+# tooling. Development relaxes this (see the development settings module);
+# production supplies an explicit allow-list.
+CORS_ALLOWED_ORIGINS: list[str] = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
+CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS: list[str] = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())

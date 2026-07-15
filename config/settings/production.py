@@ -5,8 +5,8 @@ Hardens the base configuration and fails fast on misconfiguration. Secrets and
 infrastructure endpoints are supplied exclusively through the hosting platform's
 environment variables — never committed to the repository.
 
-The remaining production hardening (HSTS tuning, secure cookies, S3 static/media
-storage, Sentry) is completed in Step 11 (Deployment & Monitoring).
+Remaining operational hardening (HSTS tuning, static-file serving strategy,
+Sentry error tracking) is completed in Step 11 (Deployment & Monitoring).
 """
 
 from __future__ import annotations
@@ -14,7 +14,17 @@ from __future__ import annotations
 from decouple import Csv
 
 from .base import *  # noqa: F401,F403
-from .base import DATABASES, REDIS_URL, config
+from .base import (
+    AWS_S3_REGION_NAME,
+    AWS_STORAGE_BUCKET_NAME,
+    DATABASES,
+    FIREBASE_CREDENTIALS_PATH,
+    RAZORPAY_KEY_ID,
+    RAZORPAY_KEY_SECRET,
+    RAZORPAY_WEBHOOK_SECRET,
+    REDIS_URL,
+    config,
+)
 
 # DEBUG must always be False in production.
 DEBUG = False
@@ -33,6 +43,29 @@ if DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
 
 if not REDIS_URL:
     raise RuntimeError("Production requires REDIS_URL to be configured.")
+
+# Critical integration secrets. Core product flows (authentication, media
+# uploads, payments) cannot function without these, so a missing value must
+# abort startup rather than surface as a runtime failure under user traffic.
+# Feature-flaggable extras are validated lazily by their services instead.
+_REQUIRED_SETTINGS = {
+    "FIREBASE_CREDENTIALS_PATH": FIREBASE_CREDENTIALS_PATH,  # auth + push
+    "AWS_STORAGE_BUCKET_NAME": AWS_STORAGE_BUCKET_NAME,  # media uploads
+    "AWS_S3_REGION_NAME": AWS_S3_REGION_NAME,  # media uploads
+    "RAZORPAY_KEY_ID": RAZORPAY_KEY_ID,  # payments
+    "RAZORPAY_KEY_SECRET": RAZORPAY_KEY_SECRET,  # payments
+    "RAZORPAY_WEBHOOK_SECRET": RAZORPAY_WEBHOOK_SECRET,  # webhook verification
+}
+_missing = sorted(name for name, value in _REQUIRED_SETTINGS.items() if not value)
+if _missing:
+    raise RuntimeError(
+        "Production is missing required configuration: " + ", ".join(_missing)
+    )
+
+# Explicit CORS/CSRF allow-lists are mandatory in production; an empty list
+# would silently reject the client rather than fail loudly, so require them.
+if not config("CORS_ALLOWED_ORIGINS", default=""):
+    raise RuntimeError("Production requires CORS_ALLOWED_ORIGINS to be configured.")
 
 # --- Baseline security hardening --------------------------------------------
 SECURE_SSL_REDIRECT = True

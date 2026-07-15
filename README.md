@@ -78,6 +78,22 @@ python manage.py check
 
 Select with `DJANGO_SETTINGS_MODULE`.
 
+## Testing
+
+Tests run under `pytest` with `pytest-django`, using the self-contained
+`config.settings.test` settings (SQLite, in-memory cache/channel layer, eager
+Celery) — no `.env` or external services required. External integrations
+(Firebase, Razorpay, S3) are mocked.
+
+```bash
+pytest                       # run the suite
+pytest --cov --cov-report=term-missing   # with coverage
+```
+
+Shared factory-boy factories live in `tests/factories.py`. CI
+(`.github/workflows/ci.yml`) runs ruff, black --check, a migration-drift check,
+and pytest with an 85% coverage gate on Python 3.10 and 3.11.
+
 ## Runtime entrypoints
 
 | Process | Command (production) | Serves |

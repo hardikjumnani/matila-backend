@@ -29,3 +29,24 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["apps", "config"]
+
+# ===========================================================================
+# Coverage (measured in CI via `pytest --cov`).
+# ===========================================================================
+[tool.coverage.run]
+source = ["apps", "config"]
+branch = true
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/tests.py",
+    "manage.py",
+    "config/asgi.py",
+    "config/wsgi.py",
+    "config/settings/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+

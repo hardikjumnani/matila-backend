@@ -92,6 +92,37 @@ class ChatService:
     def is_writable(self, chat: Chat) -> bool:
         return chat.status in self.WRITABLE_STATUSES
 
+    # -- Read receipts ------------------------------------------------------
+
+    def mark_read(
+        self, *, user: User, chat_id: str, last_read_message_id: str
+    ) -> ServiceResult[ChatParticipant]:
+        """Advance a participant's read pointer to a message in the chat.
+
+        ChatService owns chat_participants, so the read-state pointer lives here
+        rather than in MessageService. The target message is validated to belong
+        to the chat to reject spoofed pointers.
+        """
+        from apps.messaging.models import Message
+
+        chat = self.get_chat(chat_id)
+        if chat is None:
+            return ServiceResult.fail("RESOURCE_NOT_FOUND", "Chat not found.")
+        participant = self.get_participant(chat, user)
+        if participant is None:
+            return ServiceResult.fail(
+                "FORBIDDEN", "You are not a participant of this chat."
+            )
+        if not Message.objects.filter(id=last_read_message_id, chat=chat).exists():
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "Message does not belong to this chat."
+            )
+
+        participant.last_read_message_id = last_read_message_id
+        participant.last_read_at = timezone.now()
+        participant.save(update_fields=["last_read_message_id", "last_read_at"])
+        return ServiceResult.ok(participant)
+
     # -- Creation -----------------------------------------------------------
 
     @transaction.atomic

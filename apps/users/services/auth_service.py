@@ -37,8 +37,9 @@ class SessionData:
 class AuthService:
     """Authentication, user bootstrap, and profile management (owns users)."""
 
-    def __init__(self, *, storage_service=None) -> None:
+    def __init__(self, *, storage_service=None, audit_service=None) -> None:
         self._storage_service = storage_service
+        self._audit_service = audit_service
 
     @property
     def _storage(self):
@@ -49,6 +50,34 @@ class AuthService:
 
             self._storage_service = StorageService()
         return self._storage_service
+
+    @property
+    def _audit(self):
+        if self._audit_service is None:
+            from apps.audit.services.audit_service import AuditService
+
+            self._audit_service = AuditService()
+        return self._audit_service
+
+    def update_account_status(
+        self, *, user: User, status: str, admin_id: str
+    ) -> ServiceResult[User]:
+        """Admin action: change a user's account status and audit it."""
+        from apps.audit.enums import ActorType
+
+        if status not in AccountStatus.values:
+            return ServiceResult.fail("VALIDATION_ERROR", "Invalid account status.")
+        user.account_status = status
+        user.save(update_fields=["account_status", "updated_at"])
+        self._audit.log(
+            actor_type=ActorType.ADMIN,
+            actor_id=admin_id,
+            action=f"user.status.{status.lower()}",
+            entity_type="user",
+            entity_id=str(user.id),
+            metadata={"account_status": status},
+        )
+        return ServiceResult.ok(user)
 
     def get_user_by_firebase_uid(self, firebase_uid: str) -> User | None:
         """Return the user for a Firebase UID, or ``None`` if not bootstrapped."""

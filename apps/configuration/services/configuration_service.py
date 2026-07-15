@@ -39,6 +39,17 @@ _MISSING = "__config_missing__"
 class ConfigurationService:
     """Runtime configuration and feature-flag access with caching."""
 
+    def __init__(self, *, audit_service=None) -> None:
+        self._audit_service = audit_service
+
+    @property
+    def _audit(self):
+        if self._audit_service is None:
+            from apps.audit.services.audit_service import AuditService
+
+            self._audit_service = AuditService()
+        return self._audit_service
+
     # -- Generic accessors --------------------------------------------------
 
     def get_config(self, key: str, default: Any = None) -> Any:
@@ -128,6 +139,79 @@ class ConfigurationService:
                 "latest": self.get_config(AppConfigKey.LATEST_VERSION),
             },
         }
+
+    # -- Admin writes -------------------------------------------------------
+
+    def set_flag(
+        self,
+        *,
+        key: str,
+        value: Any,
+        updated_by=None,
+        admin_id: str = "",
+        description: str | None = None,
+    ) -> FeatureFlag:
+        """Upsert a feature flag, invalidate its cache, and audit the change."""
+        return self._set_entry(
+            model=FeatureFlag,
+            prefix=_FLAG_PREFIX,
+            key=key,
+            value=value,
+            updated_by=updated_by,
+            admin_id=admin_id,
+            description=description,
+            entity_type="feature_flag",
+        )
+
+    def set_config(
+        self,
+        *,
+        key: str,
+        value: Any,
+        updated_by=None,
+        admin_id: str = "",
+        description: str | None = None,
+    ) -> AppConfig:
+        """Upsert an app-config value, invalidate its cache, and audit."""
+        return self._set_entry(
+            model=AppConfig,
+            prefix=_CONFIG_PREFIX,
+            key=key,
+            value=value,
+            updated_by=updated_by,
+            admin_id=admin_id,
+            description=description,
+            entity_type="app_config",
+        )
+
+    def _set_entry(
+        self,
+        *,
+        model,
+        prefix: str,
+        key: str,
+        value: Any,
+        updated_by,
+        admin_id: str,
+        description: str | None,
+        entity_type: str,
+    ):
+        from apps.audit.enums import ActorType
+
+        defaults: dict[str, Any] = {"value": value, "updated_by": updated_by}
+        if description is not None:
+            defaults["description"] = description
+        entry, _created = model.objects.update_or_create(key=key, defaults=defaults)
+        cache.delete(prefix + key)
+        self._audit.log(
+            actor_type=ActorType.ADMIN,
+            actor_id=admin_id,
+            action=f"{entity_type}.updated",
+            entity_type=entity_type,
+            entity_id=key,
+            metadata={"value": value},
+        )
+        return entry
 
     # -- Cache maintenance --------------------------------------------------
 

@@ -4,6 +4,19 @@ from __future__ import annotations
 
 from django.urls import path
 
+from apps.admin_panel.api.management_views import (
+    AdminAppConfigListView,
+    AdminAppConfigUpdateView,
+    AdminAuditLogListView,
+    AdminDashboardStatsView,
+    AdminFeatureFlagListView,
+    AdminFeatureFlagUpdateView,
+    AdminUserActivateView,
+    AdminUserBanView,
+    AdminUserDetailView,
+    AdminUserListView,
+    AdminUserSuspendView,
+)
 from apps.admin_panel.api.report_views import (
     AdminReportDetailView,
     AdminReportDismissView,
@@ -63,5 +76,56 @@ urlpatterns = [
         "admin/reports/<uuid:report_id>/dismiss",
         AdminReportDismissView.as_view(),
         name="report-dismiss",
+    ),
+    # User management
+    path("admin/users", AdminUserListView.as_view(), name="user-list"),
+    path(
+        "admin/users/<uuid:user_id>",
+        AdminUserDetailView.as_view(),
+        name="user-detail",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/suspend",
+        AdminUserSuspendView.as_view(),
+        name="user-suspend",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/activate",
+        AdminUserActivateView.as_view(),
+        name="user-activate",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/ban",
+        AdminUserBanView.as_view(),
+        name="user-ban",
+    ),
+    # Feature flags
+    path(
+        "admin/feature-flags",
+        AdminFeatureFlagListView.as_view(),
+        name="feature-flag-list",
+    ),
+    path(
+        "admin/feature-flags/<str:key>",
+        AdminFeatureFlagUpdateView.as_view(),
+        name="feature-flag-update",
+    ),
+    # App config
+    path(
+        "admin/app-config",
+        AdminAppConfigListView.as_view(),
+        name="app-config-list",
+    ),
+    path(
+        "admin/app-config/<str:key>",
+        AdminAppConfigUpdateView.as_view(),
+        name="app-config-update",
+    ),
+    # Audit logs & dashboard
+    path("admin/audit-logs", AdminAuditLogListView.as_view(), name="audit-log-list"),
+    path(
+        "admin/dashboard/stats",
+        AdminDashboardStatsView.as_view(),
+        name="dashboard-stats",
     ),
 ]

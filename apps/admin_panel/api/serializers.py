@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from apps.audit.models import AuditLog
 from apps.common.media import resolve_media_url
+from apps.configuration.models import AppConfig, FeatureFlag
 from apps.messaging.enums import MediaStatus
 from apps.messaging.models import Message
 from apps.reports.enums import ResolutionAction
 from apps.reports.models import Report
+from apps.users.models import User
 from apps.verification.models import VerificationRequest
 
 
@@ -111,3 +114,73 @@ class ResolveReportSerializer(serializers.Serializer):
 class DismissReportSerializer(serializers.Serializer):
     is_false_report = serializers.BooleanField(required=False, default=False)
     admin_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """Full user view for admin management."""
+
+    profile_photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "college_email",
+            "full_name",
+            "profile_photo_url",
+            "gender",
+            "intent",
+            "gender_preferences",
+            "verification_status",
+            "account_status",
+            "onboarding_completed_at",
+            "verified_at",
+            "last_active_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_profile_photo_url(self, obj: User) -> str:
+        return resolve_media_url(obj.profile_photo_url)
+
+
+class FeatureFlagSerializer(serializers.ModelSerializer):
+    updated_by_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = FeatureFlag
+        fields = ["id", "key", "value", "description", "updated_by_id", "updated_at"]
+        read_only_fields = fields
+
+
+class AppConfigSerializer(serializers.ModelSerializer):
+    updated_by_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = AppConfig
+        fields = ["id", "key", "value", "description", "updated_by_id", "updated_at"]
+        read_only_fields = fields
+
+
+class SetValueSerializer(serializers.Serializer):
+    """Body for updating a feature flag or app-config entry."""
+
+    value = serializers.JSONField()
+    description = serializers.CharField(required=False, allow_blank=True)
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id",
+            "actor_type",
+            "actor_id",
+            "action",
+            "entity_type",
+            "entity_id",
+            "metadata",
+            "request_id",
+            "created_at",
+        ]
+        read_only_fields = fields

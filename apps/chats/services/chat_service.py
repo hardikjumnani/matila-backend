@@ -32,6 +32,7 @@ from apps.chats.enums import (
     ParticipantStatus,
 )
 from apps.chats.models import Chat, ChatParticipant
+from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
 from apps.users.models import User
 
@@ -121,6 +122,16 @@ class ChatService:
         participant.last_read_message_id = last_read_message_id
         participant.last_read_at = timezone.now()
         participant.save(update_fields=["last_read_message_id", "last_read_at"])
+        # Read receipt goes to the other participant only.
+        reader_id, last_read = user.id, str(last_read_message_id)
+        transaction.on_commit(
+            lambda: broadcast_to_chat(
+                chat_id,
+                "chat.read",
+                {"user_id": str(reader_id), "last_read_message_id": last_read},
+                exclude_user_id=reader_id,
+            )
+        )
         return ServiceResult.ok(participant)
 
     # -- Creation -----------------------------------------------------------
@@ -188,10 +199,12 @@ class ChatService:
                 return ServiceResult.ok(chat)
 
             now = timezone.now()
+            old_status = chat.status
             chat.status = ChatStatus.EXPIRED
             # Phase stays ANONYMOUS: identity was never revealed (frozen rule).
             chat.status_changed_at = now
             chat.save(update_fields=["status", "status_changed_at"])
+            self._broadcast_state_change(chat.id, old_status, ChatStatus.EXPIRED)
 
         self._notify_participants(
             chat,
@@ -213,6 +226,7 @@ class ChatService:
                     "CONFLICT", "Chat cannot be extended in its current state."
                 )
             now = timezone.now()
+            old_status = chat.status
             chat.status = ChatStatus.EXTENDED
             chat.status_changed_at = now
             chat.current_phase_ends_at = now + timedelta(
@@ -229,6 +243,7 @@ class ChatService:
                     "anonymous_chat_extension_count",
                 ]
             )
+            self._broadcast_state_change(chat.id, old_status, ChatStatus.EXTENDED)
         chat.refresh_from_db(fields=["anonymous_chat_extension_count"])
         logger.info("Chat %s extended.", chat.id)
         return ServiceResult.ok(chat)
@@ -246,10 +261,12 @@ class ChatService:
                     "CONFLICT", "Chat has ended and cannot be revealed."
                 )
             now = timezone.now()
+            old_status = chat.status
             chat.status = ChatStatus.REVEALED
             chat.current_phase = ChatPhase.REVEALED
             chat.status_changed_at = now
             chat.save(update_fields=["status", "current_phase", "status_changed_at"])
+            self._broadcast_state_change(chat.id, old_status, ChatStatus.REVEALED)
         logger.info("Chat %s revealed.", chat.id)
         return ServiceResult.ok(chat)
 
@@ -262,6 +279,7 @@ class ChatService:
             if chat.status == ChatStatus.ENDED:
                 return ServiceResult.ok(chat)
             now = timezone.now()
+            old_status = chat.status
             chat.status = ChatStatus.ENDED
             chat.end_reason = reason
             chat.ended_at = now
@@ -269,6 +287,7 @@ class ChatService:
             chat.save(
                 update_fields=["status", "end_reason", "ended_at", "status_changed_at"]
             )
+            self._broadcast_state_change(chat.id, old_status, ChatStatus.ENDED)
         logger.info("Chat %s ended (%s).", chat.id, reason)
         return ServiceResult.ok(chat)
 
@@ -305,6 +324,25 @@ class ChatService:
         return ServiceResult.ok(participant)
 
     # -- Internal helpers ---------------------------------------------------
+
+    def _broadcast_state_change(
+        self, chat_id, old_status: str, new_status: str
+    ) -> None:
+        """Broadcast chat.state_updated after the transition commits."""
+        if old_status == new_status:
+            return
+        cid = str(chat_id)
+        transaction.on_commit(
+            lambda: broadcast_to_chat(
+                cid,
+                "chat.state_updated",
+                {
+                    "chat_id": cid,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                },
+            )
+        )
 
     def _notify_participants(
         self, chat: Chat, *, notification_type: str, title: str, body: str

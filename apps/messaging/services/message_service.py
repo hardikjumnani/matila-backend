@@ -17,13 +17,16 @@ import logging
 from datetime import timedelta
 from typing import BinaryIO
 
+from django.db import transaction
 from django.utils import timezone
 
+from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
 from apps.configuration.constants import FeatureFlagKey
 from apps.messaging.constants import MAX_TEXT_MESSAGE_LENGTH, MEDIA_RETENTION_DAYS
 from apps.messaging.enums import MediaStatus, MediaVisibility, MessageType
 from apps.messaging.models import Message
+from apps.messaging.realtime import build_message_payload
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,7 @@ class MessageService:
             reply_to_message=reply,
         )
         self._chats.record_new_message(chat, sent_at=message.created_at)
+        self._broadcast_new_message(message)
         return ServiceResult.ok(message)
 
     def send_image(
@@ -151,6 +155,7 @@ class MessageService:
             reply_to_message=reply,
         )
         self._chats.record_new_message(chat, sent_at=message.created_at)
+        self._broadcast_new_message(message)
         return ServiceResult.ok(message)
 
     def create_system_message(
@@ -194,6 +199,20 @@ class MessageService:
         message.viewed_at = timezone.now()
         message.media_status = MediaStatus.VIEWED
         message.save(update_fields=["viewed_at", "media_status"])
+        # Notify the sender (not the viewer) that their media was consumed.
+        chat_id, message_id, viewer_id = (
+            str(message.chat_id),
+            str(message.id),
+            user.id,
+        )
+        transaction.on_commit(
+            lambda: broadcast_to_chat(
+                chat_id,
+                "message.viewed",
+                {"message_id": message_id},
+                exclude_user_id=viewer_id,
+            )
+        )
         return ServiceResult.ok(message)
 
     # -- Deletion -----------------------------------------------------------
@@ -211,9 +230,28 @@ class MessageService:
             message.is_deleted = True
             message.deleted_at = timezone.now()
             message.save(update_fields=["is_deleted", "deleted_at"])
+            chat_id, message_id = str(message.chat_id), str(message.id)
+            transaction.on_commit(
+                lambda: broadcast_to_chat(
+                    chat_id, "message.deleted", {"message_id": message_id}
+                )
+            )
         return ServiceResult.ok(message)
 
     # -- Internal -----------------------------------------------------------
+
+    def _broadcast_new_message(self, message: Message) -> None:
+        """Broadcast message.new to the chat group after the row commits.
+
+        Emitted here (not in the transport layer) so both REST and WebSocket
+        sends deliver the message in real time exactly once, and only after the
+        database transaction has committed.
+        """
+        payload = {"message": build_message_payload(message)}
+        chat_id = str(message.chat_id)
+        transaction.on_commit(
+            lambda: broadcast_to_chat(chat_id, "message.new", payload)
+        )
 
     def _resolve_writable_chat(
         self, chat_id: str, sender: User

@@ -9,7 +9,6 @@ history, as required by the frozen schema.
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.db import models
 
 from apps.common.models import TimeStampedUUIDModel
@@ -39,9 +38,10 @@ class VerificationRequest(TimeStampedUUIDModel):
         default=VerificationStatus.PENDING,
     )
     review_notes = models.TextField(blank=True, default="")
-    # The admin (Django staff account) who reviewed this request, if any.
+    # The admin (a users.User whose email is on ADMIN_EMAILS) who reviewed this
+    # request, if any.
     reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        "users.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

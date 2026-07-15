@@ -21,4 +21,5 @@ urlpatterns = [
     path("", include("apps.reports.api.urls")),
     path("", include("apps.ratings.api.urls")),
     path("", include("apps.notifications.api.urls")),
+    path("", include("apps.admin_panel.api.urls")),
 ]

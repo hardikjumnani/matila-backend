@@ -414,3 +414,13 @@ CORS_ALLOWED_ORIGINS: list[str] = config("CORS_ALLOWED_ORIGINS", default="", cas
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS: list[str] = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
+
+
+# ---------------------------------------------------------------------------
+# Admin access
+# ---------------------------------------------------------------------------
+# Admins are ordinary Firebase-authenticated users whose college email is on
+# this allow-list. This keeps a single authentication system (no separate admin
+# accounts) and is sufficient at the single-college scale. Matching is
+# case-insensitive (see apps.admin_panel.permissions.IsAdminUser).
+ADMIN_EMAILS: list[str] = config("ADMIN_EMAILS", default="", cast=Csv())

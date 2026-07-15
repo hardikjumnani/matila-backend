@@ -9,7 +9,6 @@ Values are read through ConfigurationService with Redis caching.
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.db import models
 
 from apps.common.models import UUIDModel
@@ -21,8 +20,9 @@ class RuntimeConfigEntry(UUIDModel):
     key = models.CharField(max_length=100, unique=True)
     value = models.JSONField(default=dict)
     description = models.TextField(blank=True, default="")
+    # The admin (a users.User) who last changed this entry.
     updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        "users.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

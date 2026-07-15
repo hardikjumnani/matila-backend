@@ -109,6 +109,26 @@ class ConfigurationService:
         merged.update({row.key: row.value for row in FeatureFlag.objects.all()})
         return merged
 
+    def get_runtime_config(self) -> dict[str, Any]:
+        """Assemble the complete runtime configuration for the /config endpoint."""
+        return {
+            "feature_flags": self.get_all_flags(),
+            "pricing": {
+                "reveal_price_paise": self.get_reveal_price_paise(),
+                "chat_extension_price_paise": self.get_chat_extension_price_paise(),
+            },
+            "rating_questionnaire": self.get_rating_questionnaire(),
+            "faq": self.get_config(AppConfigKey.FAQ_CONTENT),
+            "community_guidelines": self.get_config(AppConfigKey.COMMUNITY_GUIDELINES),
+            "support_email": self.get_config(AppConfigKey.SUPPORT_EMAIL),
+            "app_version": {
+                "minimum_supported": self.get_config(
+                    AppConfigKey.MINIMUM_SUPPORTED_VERSION
+                ),
+                "latest": self.get_config(AppConfigKey.LATEST_VERSION),
+            },
+        }
+
     # -- Cache maintenance --------------------------------------------------
 
     def invalidate_config(self, key: str) -> None:

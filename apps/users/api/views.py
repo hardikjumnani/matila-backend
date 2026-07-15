@@ -1,10 +1,10 @@
 """
 Users API views.
 
-Only the session bootstrap endpoint is implemented in Step 4. It is the single
-entry point that may create a user, so it authenticates the Firebase token
-directly (rather than via the default authentication class, which requires an
-already-bootstrapped user) and permits otherwise-anonymous callers.
+Views are thin: authenticate, validate input, delegate to AuthService, and shape
+the response. All business rules live in the service. Successful bodies are
+returned raw and wrapped by the envelope renderer; service failures are mapped
+to the standard error envelope by ``service_failure_response``.
 """
 
 from __future__ import annotations
@@ -13,25 +13,24 @@ import logging
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.firebase import InvalidFirebaseToken, verify_id_token
-from apps.common.responses import envelope_error, envelope_success
-from apps.users.api.serializers import SessionResponseSerializer, UserSerializer
+from apps.common.responses import envelope_error, service_failure_response
+from apps.users.api.serializers import (
+    ProfilePhotoUploadSerializer,
+    SessionResponseSerializer,
+    UserProfileUpdateSerializer,
+    UserSerializer,
+)
 from apps.users.authentication import extract_bearer_token
 from apps.users.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
-
-# HTTP status per business error code returned by the bootstrap flow.
-_ERROR_STATUS = {
-    "VALIDATION_ERROR": status.HTTP_400_BAD_REQUEST,
-    "ACCOUNT_SUSPENDED": status.HTTP_403_FORBIDDEN,
-    "ACCOUNT_BANNED": status.HTTP_403_FORBIDDEN,
-}
 
 
 class SessionView(APIView):
@@ -46,11 +45,7 @@ class SessionView(APIView):
 
     @extend_schema(
         request=None,
-        responses={
-            200: OpenApiResponse(SessionResponseSerializer),
-            401: OpenApiResponse(description="Missing or invalid Firebase token."),
-            403: OpenApiResponse(description="Account suspended or banned."),
-        },
+        responses={200: OpenApiResponse(SessionResponseSerializer)},
         description=(
             "Verify the Firebase ID token from the Authorization header, create "
             "the user on first sign-in, and return the profile plus the next "
@@ -80,20 +75,78 @@ class SessionView(APIView):
             email=claims.get("email", ""),
         )
         if result.failed:
-            return envelope_error(
-                result.error_code,
-                result.error_message,
-                _ERROR_STATUS.get(result.error_code, status.HTTP_400_BAD_REQUEST),
-            )
+            return service_failure_response(result)
 
         data = result.data
-        return envelope_success(
+        status_code = status.HTTP_201_CREATED if data.created else status.HTTP_200_OK
+        return Response(
             {
                 "user": UserSerializer(data.user).data,
                 "next_action": data.next_action.value,
                 "created": data.created,
             },
-            status_code=(
-                status.HTTP_201_CREATED if data.created else status.HTTP_200_OK
-            ),
+            status=status_code,
         )
+
+
+class MeView(APIView):
+    """GET/PATCH /users/me — retrieve and update the current user's profile."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._auth_service = AuthService()
+
+    @extend_schema(responses=UserSerializer)
+    def get(self, request: Request) -> Response:
+        return Response(UserSerializer(request.user).data)
+
+    @extend_schema(request=UserProfileUpdateSerializer, responses=UserSerializer)
+    def patch(self, request: Request) -> Response:
+        serializer = UserProfileUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = self._auth_service.update_profile(
+            request.user, **serializer.validated_data
+        )
+        if result.failed:
+            return service_failure_response(result)
+        return Response(UserSerializer(result.data).data)
+
+
+class ProfilePhotoView(APIView):
+    """POST /users/me/profile-photo — upload the current user's profile photo."""
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._auth_service = AuthService()
+
+    @extend_schema(request=ProfilePhotoUploadSerializer, responses=UserSerializer)
+    def post(self, request: Request) -> Response:
+        serializer = ProfilePhotoUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        upload = serializer.validated_data["file"]
+        result = self._auth_service.upload_profile_photo(
+            request.user,
+            fileobj=upload,
+            filename=upload.name,
+            content_type=upload.content_type,
+        )
+        if result.failed:
+            return service_failure_response(result)
+        return Response(UserSerializer(result.data).data)
+
+
+class CompleteOnboardingView(APIView):
+    """POST /users/me/complete-onboarding — mark onboarding complete."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._auth_service = AuthService()
+
+    @extend_schema(request=None, responses=UserSerializer)
+    def post(self, request: Request) -> Response:
+        result = self._auth_service.complete_onboarding(request.user)
+        if result.failed:
+            return service_failure_response(result)
+        return Response(UserSerializer(result.data).data)

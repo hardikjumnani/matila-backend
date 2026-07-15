@@ -277,6 +277,14 @@ REST_FRAMEWORK = {
     # Anonymous requests resolve request.user to None (not a Django AnonymousUser)
     # since application users are the Firebase-backed domain model.
     "UNAUTHENTICATED_USER": None,
+    # Every response is wrapped in the standard envelope; every error flows
+    # through the standard error handler.
+    "DEFAULT_RENDERER_CLASSES": [
+        "apps.common.api.renderers.EnvelopeJSONRenderer",
+    ],
+    "EXCEPTION_HANDLER": "apps.common.api.exception_handler.custom_exception_handler",
+    "DEFAULT_PAGINATION_CLASS": "apps.common.api.pagination.StandardCursorPagination",
+    "PAGE_SIZE": 20,
 }
 
 SPECTACULAR_SETTINGS = {

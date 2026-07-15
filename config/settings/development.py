@@ -16,9 +16,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
-# Browsable API is convenient during local development only.
+# Browsable API is convenient during local development only. The envelope
+# renderer stays first so API responses keep the standard shape.
 REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [  # noqa: F405
-    "rest_framework.renderers.JSONRenderer",
+    "apps.common.api.renderers.EnvelopeJSONRenderer",
     "rest_framework.renderers.BrowsableAPIRenderer",
 ]
 

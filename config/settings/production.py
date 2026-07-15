@@ -79,5 +79,5 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # JSON-only API surface in production (no browsable API).
 REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [  # noqa: F405
-    "rest_framework.renderers.JSONRenderer",
+    "apps.common.api.renderers.EnvelopeJSONRenderer",
 ]

@@ -1,20 +1,26 @@
 """
 Serializers for the users API.
 
-Step 4 needs only read serialization of the authenticated user for the session
-bootstrap response. Profile-update and onboarding request serializers are added
-in Step 6. Serializers perform no business logic and no database access.
+Serializers validate and shape data only — no business logic, no database
+access. Editable-field rules (e.g. gender immutability after verification) are
+enforced in AuthService, not here.
 """
 
 from __future__ import annotations
 
 from rest_framework import serializers
 
+from apps.common.media import resolve_media_url
+from apps.users.enums import Gender, Intent
 from apps.users.models import User
+
+_ALLOWED_IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Read-only representation of a user's own profile."""
+
+    profile_photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -34,6 +40,45 @@ class UserSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_profile_photo_url(self, obj: User) -> str:
+        return resolve_media_url(obj.profile_photo_url)
+
+
+class UserProfileUpdateSerializer(serializers.Serializer):
+    """Validates editable profile fields for PATCH /users/me."""
+
+    full_name = serializers.CharField(max_length=150, required=False)
+    gender = serializers.ChoiceField(choices=Gender.choices, required=False)
+    intent = serializers.ChoiceField(choices=Intent.choices, required=False)
+    gender_preferences = serializers.ListField(
+        child=serializers.ChoiceField(choices=Gender.choices),
+        required=False,
+        allow_empty=True,
+    )
+
+    def validate(self, attrs: dict) -> dict:
+        if not attrs:
+            raise serializers.ValidationError("No editable fields were provided.")
+        return attrs
+
+
+class ProfilePhotoUploadSerializer(serializers.Serializer):
+    """Validates a profile-photo upload.
+
+    Uses FileField (not ImageField) to avoid a hard Pillow dependency; the
+    content type is validated explicitly. Deep image inspection can be added
+    with Pillow later if needed.
+    """
+
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        if value.content_type not in _ALLOWED_IMAGE_TYPES:
+            raise serializers.ValidationError(
+                "Unsupported image type. Use JPEG, PNG, or WebP."
+            )
+        return value
 
 
 class SessionResponseSerializer(serializers.Serializer):

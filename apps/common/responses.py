@@ -15,7 +15,45 @@ from __future__ import annotations
 
 from typing import Any
 
+from rest_framework import status as http
 from rest_framework.response import Response
+
+from apps.common.results import ServiceResult
+
+# Maps a stable business error code to its HTTP status. Codes mirror the
+# "Common Error Codes" table in API_DESIGN.md plus the WebSocket/domain codes.
+ERROR_STATUS_MAP: dict[str, int] = {
+    "UNAUTHORIZED": http.HTTP_401_UNAUTHORIZED,
+    "FORBIDDEN": http.HTTP_403_FORBIDDEN,
+    "ONBOARDING_INCOMPLETE": http.HTTP_403_FORBIDDEN,
+    "VERIFICATION_REQUIRED": http.HTTP_403_FORBIDDEN,
+    "ACCOUNT_SUSPENDED": http.HTTP_403_FORBIDDEN,
+    "ACCOUNT_BANNED": http.HTTP_403_FORBIDDEN,
+    "RESOURCE_NOT_FOUND": http.HTTP_404_NOT_FOUND,
+    "VALIDATION_ERROR": http.HTTP_400_BAD_REQUEST,
+    "CONFLICT": http.HTTP_409_CONFLICT,
+    "CHAT_READ_ONLY": http.HTTP_409_CONFLICT,
+    "MESSAGE_TOO_LONG": http.HTTP_400_BAD_REQUEST,
+    "INVALID_REPLY_TARGET": http.HTTP_400_BAD_REQUEST,
+    "MEDIA_NOT_AVAILABLE": http.HTTP_410_GONE,
+    "METHOD_NOT_ALLOWED": http.HTTP_405_METHOD_NOT_ALLOWED,
+    "RATE_LIMITED": http.HTTP_429_TOO_MANY_REQUESTS,
+    "INTERNAL_SERVER_ERROR": http.HTTP_500_INTERNAL_SERVER_ERROR,
+}
+
+
+def http_status_for_code(code: str | None) -> int:
+    """Resolve the HTTP status for a business error code (400 by default)."""
+    return ERROR_STATUS_MAP.get(code or "", http.HTTP_400_BAD_REQUEST)
+
+
+def service_failure_response(result: ServiceResult) -> Response:
+    """Turn a failed ServiceResult into the standard error envelope response."""
+    return envelope_error(
+        result.error_code or "INTERNAL_SERVER_ERROR",
+        result.error_message or "An unexpected error occurred.",
+        http_status_for_code(result.error_code),
+    )
 
 
 def envelope_success(

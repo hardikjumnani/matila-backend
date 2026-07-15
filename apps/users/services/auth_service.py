@@ -35,13 +35,99 @@ class SessionData:
 
 
 class AuthService:
-    """Authentication and user lifecycle bootstrap."""
+    """Authentication, user bootstrap, and profile management (owns users)."""
+
+    def __init__(self, *, storage_service=None) -> None:
+        self._storage_service = storage_service
+
+    @property
+    def _storage(self):
+        # Lazily construct the storage service so auth-only usage never imports
+        # boto3.
+        if self._storage_service is None:
+            from apps.common.services.storage_service import StorageService
+
+            self._storage_service = StorageService()
+        return self._storage_service
 
     def get_user_by_firebase_uid(self, firebase_uid: str) -> User | None:
         """Return the user for a Firebase UID, or ``None`` if not bootstrapped."""
         if not firebase_uid:
             return None
         return User.objects.filter(firebase_uid=firebase_uid).first()
+
+    # -- Profile management -------------------------------------------------
+
+    def update_profile(
+        self,
+        user: User,
+        *,
+        full_name: str | None = None,
+        gender: str | None = None,
+        intent: str | None = None,
+        gender_preferences: list[str] | None = None,
+    ) -> ServiceResult[User]:
+        """Update editable profile fields.
+
+        Gender becomes immutable once verification is approved (frozen rule);
+        college email is never editable through the API.
+        """
+        update_fields: list[str] = []
+        if full_name is not None:
+            user.full_name = full_name
+            update_fields.append("full_name")
+        if gender is not None:
+            if user.verification_status == VerificationStatus.APPROVED:
+                return ServiceResult.fail(
+                    "CONFLICT", "Gender cannot be changed after verification."
+                )
+            user.gender = gender
+            update_fields.append("gender")
+        if intent is not None:
+            user.intent = intent
+            update_fields.append("intent")
+        if gender_preferences is not None:
+            user.gender_preferences = gender_preferences
+            update_fields.append("gender_preferences")
+
+        if update_fields:
+            update_fields.append("updated_at")
+            user.save(update_fields=update_fields)
+        return ServiceResult.ok(user)
+
+    def complete_onboarding(self, user: User) -> ServiceResult[User]:
+        """Mark onboarding complete once required profile fields are present."""
+        missing = [
+            name
+            for name, value in (
+                ("full_name", user.full_name),
+                ("gender", user.gender),
+                ("intent", user.intent),
+            )
+            if not value
+        ]
+        if not user.gender_preferences:
+            missing.append("gender_preferences")
+        if missing:
+            return ServiceResult.fail(
+                "VALIDATION_ERROR",
+                f"Onboarding is incomplete: missing {', '.join(missing)}.",
+            )
+
+        if user.onboarding_completed_at is None:
+            user.onboarding_completed_at = timezone.now()
+            user.save(update_fields=["onboarding_completed_at", "updated_at"])
+        return ServiceResult.ok(user)
+
+    def upload_profile_photo(
+        self, user: User, *, fileobj, filename: str, content_type: str
+    ) -> ServiceResult[User]:
+        """Store a profile photo and record its storage key on the user."""
+        key = self._storage.build_key("profile-photos", filename)
+        self._storage.upload_fileobj(fileobj, key, content_type=content_type)
+        user.profile_photo_url = key
+        user.save(update_fields=["profile_photo_url", "updated_at"])
+        return ServiceResult.ok(user)
 
     @transaction.atomic
     def bootstrap_session(

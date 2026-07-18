@@ -210,6 +210,18 @@ when NTP is reachable.)
 
 ---
 
+## Step 10 — Storage switched to Azure Blob — 2026-07-19
+
+**Objective:** Standardize object storage on Azure Blob (deploying on Azure);
+drop AWS S3.
+
+**Env change:** `pip install azure-storage-blob==12.24.0` into `.venv` (removed
+boto3/django-storages from requirements). **Repo:** `StorageService` rewritten
+on the Azure SDK (same public interface); settings AWS_* → AZURE_*; tests
+updated. Live validation pending an Azure Storage account.
+
+---
+
 ## Local runtime environment — COMPLETE
 
 Postgres, Redis (Memurai), venv + deps, migrations, full test suite (267 on

@@ -47,3 +47,42 @@ jobs:
 
       - name: Tests with coverage
         run: pytest --cov --cov-report=term-missing --cov-fail-under=85
+
+  test-postgres:
+    name: Test on PostgreSQL
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      # Run the suite against a real PostgreSQL so DB-specific behavior
+      # (SKIP LOCKED row locking, JSONField, partial unique indexes, uuid FKs)
+      # is validated continuously. Cache/channel layer are in-memory in tests.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/anonymous_chat
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: anonymous_chat
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements/development.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/development.txt
+      - name: Migrate + test on PostgreSQL
+        run: |
+          python manage.py migrate
+          pytest -q

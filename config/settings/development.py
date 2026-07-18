@@ -2,12 +2,17 @@
 Development settings.
 
 Enables DEBUG, relaxes host checking, and inherits everything else from
-``base``. Integration-specific development configuration (local Redis, local
-Postgres, sandbox credentials) is layered in via the local ``.env`` file in
-Step 2.
+``base``. Integration-specific development configuration (Redis, sandbox
+credentials) is layered in via the local ``.env`` file.
+
+PostgreSQL is the default development database: local development runs on the
+same engine as production so behavior matches. SQLite is no longer used for
+development (it remains only as the test-harness default for fast CI).
 """
 
 from __future__ import annotations
+
+import dj_database_url
 
 from .base import *  # noqa: F401,F403
 from .base import config
@@ -15,6 +20,19 @@ from .base import config
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
+
+# Default the development database to local PostgreSQL (overridable via
+# DATABASE_URL). No SQLite fallback here.
+DATABASES = {
+    "default": dj_database_url.parse(
+        config(
+            "DATABASE_URL",
+            default="postgres://postgres:postgres@localhost:5432/anonymous_chat",
+        ),
+        conn_max_age=config("DB_CONN_MAX_AGE", default=60, cast=int),
+        conn_health_checks=True,
+    )
+}
 
 # Browsable API is convenient during local development only. The envelope
 # renderer stays first so API responses keep the standard shape.

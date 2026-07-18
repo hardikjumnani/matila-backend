@@ -390,6 +390,11 @@ CELERY_BEAT_SCHEDULE = {
 # Google shut down the legacy FCM API in June 2024. Push notifications are sent
 # via firebase_admin.messaging using these same credentials.
 FIREBASE_CREDENTIALS_PATH: str = config("FIREBASE_CREDENTIALS_PATH", default="")
+# Clock-skew tolerance (seconds, 0-60) for ID-token verification. Small default
+# for production; raise locally if the dev machine's clock cannot reach NTP.
+FIREBASE_TOKEN_CLOCK_SKEW_SECONDS: int = config(
+    "FIREBASE_TOKEN_CLOCK_SKEW_SECONDS", default=10, cast=int
+)
 
 
 # ---------------------------------------------------------------------------

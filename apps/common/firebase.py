@@ -69,7 +69,16 @@ def verify_id_token(token: str) -> dict[str, Any]:
     if not token:
         raise InvalidFirebaseToken("No token supplied.")
     try:
-        return auth.verify_id_token(token, app=_get_app())
+        # A small clock-skew tolerance absorbs minor differences between this
+        # server's clock and Firebase's token-issuing clock. Configurable via
+        # FIREBASE_TOKEN_CLOCK_SKEW_SECONDS (0-60); default is small for prod.
+        return auth.verify_id_token(
+            token,
+            app=_get_app(),
+            clock_skew_seconds=getattr(
+                settings, "FIREBASE_TOKEN_CLOCK_SKEW_SECONDS", 10
+            ),
+        )
     except FirebaseNotConfigured:
         raise
     except Exception as exc:  # firebase_admin raises a range of token errors.

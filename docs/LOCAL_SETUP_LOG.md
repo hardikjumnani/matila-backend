@@ -184,6 +184,32 @@ WebSocket round-trip is deferred until Firebase auth is configured.)
 
 ---
 
+## Step 9 — Firebase Authentication (local) — 2026-07-19
+
+**Objective:** Configure Firebase and validate the auth chain end-to-end.
+
+**Actions:**
+- Created Firebase project `matila-dev`; downloaded a service-account key to
+  `C:/Users/MegaFunBox/secrets/matila-dev-firebase-adminsdk-fbsvc-c69892faee.json`
+  (kept outside the repo; secret).
+- `.env`: `FIREBASE_CREDENTIALS_PATH` set; production sign-in method decided =
+  **college email OTP, passwordless** (no Google sign-in).
+- Minted a real Firebase ID token via the Admin SDK custom-token flow (no
+  password provider enabled), verified it, and ran `bootstrap_session` → created
+  a real user in Postgres with `next_action=COMPLETE_ONBOARDING`.
+
+**Machine finding — clock skew:** the PC clock is ~21s behind and the network
+blocks NTP (UDP 123), so `w32tm /resync` reported "no time data available".
+Firebase rejected the token as "used too early". Fix: added a configurable
+`FIREBASE_TOKEN_CLOCK_SKEW_SECONDS` (default 10 for prod) to token verification;
+set to `60` locally to absorb the offset. (Recommend fixing the machine clock
+when NTP is reachable.)
+
+**Repo code changes:** `apps/common/firebase.py` (clock-skew tolerance),
+`config/settings/base.py` (new setting), `.env.example` (doc).
+
+---
+
 ## Local runtime environment — COMPLETE
 
 Postgres, Redis (Memurai), venv + deps, migrations, full test suite (267 on

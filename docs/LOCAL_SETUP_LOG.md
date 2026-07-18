@@ -147,3 +147,46 @@ Verified `GET /health/` → `{"status":"ok"}` and `GET /api/v1/config` →
 **Notes:** `runserver` serves both HTTP and WebSocket in dev (Daphne). Gunicorn
 is Linux-only and is not used on Windows — it is a production concern for the
 Azure phase. No machine changes.
+
+---
+
+## Step 7 — Run Celery worker + beat — 2026-07-18
+
+**Objective:** Validate background jobs against the real Redis broker.
+
+**Commands:**
+```powershell
+python -m celery -A config worker -l info --pool=solo   # Terminal A
+python -m celery -A config beat -l info                 # Terminal B
+```
+
+**Result:** Worker connected to `redis://localhost:6379/0`, printed
+`celery@MegaFunBox ready.`, and registered all 5 tasks. An on-demand
+`refresh_configuration_cache.delay()` was **received → succeeded**. Beat ticks
+on schedule. (Windows requires `--pool=solo`; default prefork pool unsupported.)
+
+**No machine changes.**
+
+---
+
+## Step 8 — Validate the real Redis channel layer — 2026-07-18
+
+**Objective:** Prove WebSocket fan-out works through Memurai.
+
+**Action:** Ran a `get_channel_layer()` probe (`group_add` → `group_send` →
+`receive`) against the RedisChannelLayer.
+
+**Result:** Round-trip succeeded — message delivered through Memurai. Confirms
+the production channel-layer path works on real Redis. (Full *authenticated*
+WebSocket round-trip is deferred until Firebase auth is configured.)
+
+**No machine changes.**
+
+---
+
+## Local runtime environment — COMPLETE
+
+Postgres, Redis (Memurai), venv + deps, migrations, full test suite (267 on
+Postgres), Django (runserver/Daphne), Celery worker + beat, and the Redis
+channel layer are all working locally. Remaining for full end-to-end:
+external integration credentials (Firebase, Razorpay, AWS S3).

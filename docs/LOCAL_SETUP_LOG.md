@@ -128,3 +128,22 @@ row-level locking is proven.
 
 **Changes made to the machine:** none beyond `.env` (Step 4). Everything else is
 repo code.
+
+---
+
+## Step 6 — Run the Django backend locally — 2026-07-18
+
+**Objective:** Confirm the app boots and serves against real Postgres + Redis.
+
+**Command:**
+```powershell
+python manage.py runserver 127.0.0.1:8000
+```
+
+**Result:** Server boots on the ASGI/Daphne dev server (Daphne is installed).
+Verified `GET /health/` → `{"status":"ok"}` and `GET /api/v1/config` →
+`success: true` with pricing/flags/version. `/api/docs/` renders Swagger.
+
+**Notes:** `runserver` serves both HTTP and WebSocket in dev (Daphne). Gunicorn
+is Linux-only and is not used on Windows — it is a production concern for the
+Azure phase. No machine changes.

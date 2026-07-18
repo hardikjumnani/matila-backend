@@ -218,7 +218,14 @@ drop AWS S3.
 **Env change:** `pip install azure-storage-blob==12.24.0` into `.venv` (removed
 boto3/django-storages from requirements). **Repo:** `StorageService` rewritten
 on the Azure SDK (same public interface); settings AWS_* → AZURE_*; tests
-updated. Live validation pending an Azure Storage account.
+updated.
+
+**Live validation — 2026-07-19:** Created Azure Storage account `matiladevstore`
+(RG `matila-dev-rg`, Central India, Standard/LRS) with a **private** `media`
+container (Azure-for-Students region policy blocks East US — used an allowed
+region). Connection string added to local `.env` (secret; not committed). Ran a
+real round-trip: **upload → SAS-URL read (match) → delete → 404 → idempotent
+re-delete** — all passed. Quieted the noisy Azure SDK logger to WARNING.
 
 ---
 

@@ -321,6 +321,12 @@ LOGGING = {
             "level": config("APP_LOG_LEVEL", default="INFO"),
             "propagate": False,
         },
+        # The Azure SDK logs full request/response at INFO — far too verbose.
+        "azure": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }
 

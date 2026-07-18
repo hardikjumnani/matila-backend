@@ -51,3 +51,6 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Celery Beat local schedule database (runtime artifact)
+celerybeat-schedule*

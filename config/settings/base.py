@@ -7,8 +7,8 @@ environment-dependent values are read through ``python-decouple`` so that no
 sensitive value is ever hard-coded in the codebase.
 
 This module holds configuration common to every environment: database, cache,
-channel layer, Celery, storage, and the external integrations (Firebase, AWS
-S3, Razorpay, CORS/CSRF). Credentials and endpoints are read from the
+channel layer, Celery, storage, and the external integrations (Firebase, Azure
+Blob Storage, Razorpay, CORS/CSRF). Credentials and endpoints are read from the
 environment; the settings themselves are safe to commit. Environment-specific
 hardening and overrides live in ``development`` and ``production``.
 """
@@ -218,33 +218,25 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # User-uploaded media (profile photos, college IDs, gesture selfies, chat
-# images) lives in AWS S3 in every real environment. All such media is PRIVATE:
-# access is granted through short-lived signed URLs, never public ACLs, because
-# verification documents and view-once images must not be world-readable.
-AWS_STORAGE_BUCKET_NAME: str = config("AWS_STORAGE_BUCKET_NAME", default="")
-AWS_S3_REGION_NAME: str = config("AWS_S3_REGION_NAME", default="")
-# Credentials are optional: on EC2/ECS the instance IAM role supplies them, and
-# leaving these blank lets boto3 use the role rather than static keys.
-AWS_ACCESS_KEY_ID: str = config("AWS_ACCESS_KEY_ID", default="")
-AWS_SECRET_ACCESS_KEY: str = config("AWS_SECRET_ACCESS_KEY", default="")
-AWS_S3_SIGNATURE_VERSION = "s3v4"
-AWS_DEFAULT_ACL = None  # Never attach a public ACL to uploaded objects.
-AWS_S3_FILE_OVERWRITE = False  # Distinct keys; never clobber an existing object.
-AWS_QUERYSTRING_AUTH = True  # Serve private media via signed URLs.
-AWS_QUERYSTRING_EXPIRE = config("AWS_QUERYSTRING_EXPIRE", default=3600, cast=int)
+# images) lives in Azure Blob Storage in every real environment. All such media
+# is PRIVATE: the container is not public and reads are granted through
+# short-lived SAS URLs, because verification documents and view-once images must
+# not be world-readable. Media is accessed via StorageService (not Django's
+# FileField), so the default file storage below is only a local-dev convenience.
+AZURE_STORAGE_CONNECTION_STRING: str = config(
+    "AZURE_STORAGE_CONNECTION_STRING", default=""
+)
+AZURE_STORAGE_CONTAINER: str = config("AZURE_STORAGE_CONTAINER", default="media")
+AZURE_SAS_EXPIRY_SECONDS: int = config(
+    "AZURE_SAS_EXPIRY_SECONDS", default=3600, cast=int
+)
+USE_AZURE_BLOB: bool = bool(AZURE_STORAGE_CONNECTION_STRING)
 
-USE_S3: bool = bool(AWS_STORAGE_BUCKET_NAME)
-
-if USE_S3:
-    _default_storage = {"BACKEND": "storages.backends.s3.S3Storage"}
-else:
-    # Local filesystem fallback for development without S3 credentials.
-    _default_storage = {"BACKEND": "django.core.files.storage.FileSystemStorage"}
-    MEDIA_URL = "media/"
-    MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 STORAGES = {
-    "default": _default_storage,
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },

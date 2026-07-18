@@ -15,8 +15,8 @@ from decouple import Csv
 
 from .base import *  # noqa: F401,F403
 from .base import (
-    AWS_S3_REGION_NAME,
-    AWS_STORAGE_BUCKET_NAME,
+    AZURE_STORAGE_CONNECTION_STRING,
+    AZURE_STORAGE_CONTAINER,
     DATABASES,
     FIREBASE_CREDENTIALS_PATH,
     RAZORPAY_KEY_ID,
@@ -50,8 +50,8 @@ if not REDIS_URL:
 # Feature-flaggable extras are validated lazily by their services instead.
 _REQUIRED_SETTINGS = {
     "FIREBASE_CREDENTIALS_PATH": FIREBASE_CREDENTIALS_PATH,  # auth + push
-    "AWS_STORAGE_BUCKET_NAME": AWS_STORAGE_BUCKET_NAME,  # media uploads
-    "AWS_S3_REGION_NAME": AWS_S3_REGION_NAME,  # media uploads
+    "AZURE_STORAGE_CONNECTION_STRING": AZURE_STORAGE_CONNECTION_STRING,  # media
+    "AZURE_STORAGE_CONTAINER": AZURE_STORAGE_CONTAINER,  # media
     "RAZORPAY_KEY_ID": RAZORPAY_KEY_ID,  # payments
     "RAZORPAY_KEY_SECRET": RAZORPAY_KEY_SECRET,  # payments
     "RAZORPAY_WEBHOOK_SECRET": RAZORPAY_WEBHOOK_SECRET,  # webhook verification

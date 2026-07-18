@@ -63,7 +63,7 @@ def send_push_notification(self, notification_id: str) -> None:
     except Exception as exc:  # noqa: BLE001 — transient FCM/network failure.
         _set_status(notification, PushStatus.FAILED)
         logger.warning("Push delivery failed for %s: %s", notification_id, exc)
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
     if result.invalid_tokens:
         device_service.deactivate_tokens(result.invalid_tokens)

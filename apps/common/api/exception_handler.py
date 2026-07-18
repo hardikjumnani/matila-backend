@@ -94,6 +94,6 @@ def _message_from_detail(detail: Any) -> str:
         if "detail" in detail:
             return str(detail["detail"])
         return "The request could not be processed."
-    if isinstance(detail, (list, tuple)) and detail:
+    if isinstance(detail, list | tuple) and detail:
         return str(detail[0])
     return str(detail)

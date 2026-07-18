@@ -1,20 +1,24 @@
-"""Tests for StorageService (S3 client mocked; no live AWS)."""
+"""Tests for StorageService (Azure Blob client mocked; no live Azure)."""
 
 from __future__ import annotations
 
 import io
 from unittest import mock
 
-from botocore.exceptions import ClientError
+from azure.core.exceptions import AzureError, ResourceNotFoundError
 from django.test import TestCase, override_settings
 
 from apps.common.services.storage_service import StorageService
 
 _SETTINGS = {
-    "AWS_STORAGE_BUCKET_NAME": "test-bucket",
-    "AWS_S3_REGION_NAME": "ap-south-1",
-    "AWS_QUERYSTRING_EXPIRE": 3600,
+    "AZURE_STORAGE_CONNECTION_STRING": (
+        "DefaultEndpointsProtocol=https;AccountName=acct;AccountKey=a2V5;"
+        "EndpointSuffix=core.windows.net"
+    ),
+    "AZURE_STORAGE_CONTAINER": "media",
+    "AZURE_SAS_EXPIRY_SECONDS": 3600,
 }
+_SAS = "apps.common.services.storage_service.generate_blob_sas"
 
 
 class BuildKeyTests(TestCase):
@@ -33,29 +37,36 @@ class BuildKeyTests(TestCase):
 class StorageOperationTests(TestCase):
     def setUp(self) -> None:
         self.service = StorageService()
-        self.client = mock.MagicMock()
-        self.service._s3 = self.client  # Inject the mocked boto3 client.
+        self.blob = mock.MagicMock()
+        # Inject a mocked Blob service client and skip connection-string parsing.
+        self.service._service_client = mock.MagicMock()
+        self.service._service_client.get_blob_client.return_value = self.blob
+        self.service._account_name = "acct"
+        self.service._account_key = "a2V5"
 
-    def test_upload_fileobj_calls_s3_and_returns_key(self) -> None:
+    def test_upload_calls_blob_and_returns_key(self) -> None:
         result = self.service.upload_fileobj(
             io.BytesIO(b"data"), "chat/abc.jpg", content_type="image/jpeg"
         )
         self.assertEqual(result, "chat/abc.jpg")
-        self.client.upload_fileobj.assert_called_once()
+        self.blob.upload_blob.assert_called_once()
 
-    def test_generate_presigned_url_returns_signed_url(self) -> None:
-        self.client.generate_presigned_url.return_value = "https://signed"
-        self.assertEqual(
-            self.service.generate_presigned_url("chat/abc.jpg"), "https://signed"
-        )
+    def test_generate_presigned_url_returns_sas_url(self) -> None:
+        self.blob.url = "https://acct.blob.core.windows.net/media/chat/abc.jpg"
+        with mock.patch(_SAS, return_value="sig=abc"):
+            url = self.service.generate_presigned_url("chat/abc.jpg")
+        self.assertEqual(url, self.blob.url + "?sig=abc")
 
-    def test_delete_object_is_idempotent_on_error(self) -> None:
-        self.client.delete_object.side_effect = ClientError({}, "DeleteObject")
-        # Must not raise even if S3 reports an error.
-        self.service.delete_object("chat/missing.jpg")
-        self.client.delete_object.assert_called_once()
+    def test_delete_is_idempotent_when_missing(self) -> None:
+        self.blob.delete_blob.side_effect = ResourceNotFoundError("gone")
+        self.service.delete_object("chat/missing.jpg")  # Must not raise.
+        self.blob.delete_blob.assert_called_once()
+
+    def test_delete_swallows_other_azure_errors(self) -> None:
+        self.blob.delete_blob.side_effect = AzureError("transient")
+        self.service.delete_object("chat/x.jpg")  # Must not raise.
 
     def test_empty_key_is_a_noop(self) -> None:
         self.assertEqual(self.service.generate_presigned_url(""), "")
         self.service.delete_object("")
-        self.client.delete_object.assert_not_called()
+        self.service._service_client.get_blob_client.assert_not_called()

@@ -44,7 +44,7 @@ class AuthService:
     @property
     def _storage(self):
         # Lazily construct the storage service so auth-only usage never imports
-        # boto3.
+        # the Azure SDK.
         if self._storage_service is None:
             from apps.common.services.storage_service import StorageService
 

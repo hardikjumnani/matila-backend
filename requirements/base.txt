@@ -27,9 +27,8 @@ python-decouple==3.8
 # Authentication (Firebase Admin SDK — server-side token verification)
 firebase-admin==6.6.0
 
-# Object storage (AWS S3)
-boto3==1.35.90
-django-storages==1.14.4
+# Object storage (Azure Blob Storage)
+azure-storage-blob==12.24.0
 
 # Payments
 razorpay==1.4.2

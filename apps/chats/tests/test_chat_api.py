@@ -83,6 +83,58 @@ class ChatApiTests(TestCase):
         self.assertIsNotNone(data["seconds_remaining"])
         self.assertGreater(data["seconds_remaining"], 0)
 
+    def test_other_participant_has_stable_alias(self) -> None:
+        first = self.client.get(f"/api/v1/chats/{self.chat.id}")
+        alias = first.json()["data"]["other_participant"]["alias"]
+        self.assertTrue(alias)
+        # The alias is deterministic — a second read yields the same value.
+        second = self.client.get(f"/api/v1/chats/{self.chat.id}")
+        self.assertEqual(second.json()["data"]["other_participant"]["alias"], alias)
+
+    def test_unread_count_counts_only_partner_messages(self) -> None:
+        Message.objects.create(
+            chat=self.chat,
+            sender=self.b,
+            message_type=MessageType.TEXT,
+            text_content="hey",
+        )
+        Message.objects.create(
+            chat=self.chat,
+            sender=self.b,
+            message_type=MessageType.TEXT,
+            text_content="you there?",
+        )
+        # My own message and a system message must not count.
+        Message.objects.create(
+            chat=self.chat,
+            sender=self.a,
+            message_type=MessageType.TEXT,
+            text_content="mine",
+        )
+        Message.objects.create(
+            chat=self.chat,
+            sender=None,
+            message_type=MessageType.SYSTEM,
+            text_content="joined",
+        )
+        response = self.client.get(f"/api/v1/chats/{self.chat.id}")
+        self.assertEqual(response.json()["data"]["unread_count"], 2)
+
+    def test_unread_count_clears_after_read(self) -> None:
+        message = Message.objects.create(
+            chat=self.chat,
+            sender=self.b,
+            message_type=MessageType.TEXT,
+            text_content="hi",
+        )
+        self.client.post(
+            f"/api/v1/chats/{self.chat.id}/read",
+            {"last_read_message_id": str(message.id)},
+            format="json",
+        )
+        response = self.client.get(f"/api/v1/chats/{self.chat.id}")
+        self.assertEqual(response.json()["data"]["unread_count"], 0)
+
     def test_read_advances_pointer(self) -> None:
         message = Message.objects.create(
             chat=self.chat,

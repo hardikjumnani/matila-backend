@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from apps.chats.aliases import anonymous_alias
 from apps.chats.enums import ChatPhase, ChatStatus
 from apps.common.media import resolve_media_url
 
@@ -33,6 +34,7 @@ class ChatSerializer(serializers.Serializer):
     is_writable = serializers.SerializerMethodField()
     other_participant = serializers.SerializerMethodField()
     my_participation = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
 
     def _me(self):
         return self.context["request"].user
@@ -50,8 +52,11 @@ class ChatSerializer(serializers.Serializer):
             return None
         participant = others[0]
         visible = obj.current_phase == ChatPhase.REVEALED
+        # A stable anonymous alias so the client always has a label; the real
+        # name is exposed only once identity is visible.
         return {
             "user_id": str(participant.user_id),
+            "alias": anonymous_alias(str(obj.id), str(participant.user_id)),
             "display_name": participant.user.full_name if visible else None,
             "profile_photo_url": (
                 resolve_media_url(participant.user.profile_photo_url)
@@ -59,6 +64,24 @@ class ChatSerializer(serializers.Serializer):
                 else None
             ),
         }
+
+    def get_unread_count(self, obj) -> int:
+        """Messages from the other participant after this user's read pointer."""
+        from apps.messaging.enums import MessageType
+        from apps.messaging.models import Message
+
+        me = self._me()
+        mine = [p for p in obj.participants.all() if p.user_id == me.id]
+        if not mine:
+            return 0
+        queryset = (
+            Message.objects.filter(chat_id=obj.id, is_deleted=False)
+            .exclude(sender_id=me.id)
+            .exclude(message_type=MessageType.SYSTEM)
+        )
+        if mine[0].last_read_at is not None:
+            queryset = queryset.filter(created_at__gt=mine[0].last_read_at)
+        return queryset.count()
 
     def get_my_participation(self, obj) -> dict | None:
         me = self._me()

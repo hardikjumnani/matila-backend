@@ -355,12 +355,34 @@ CELERY_TASK_SOFT_TIME_LIMIT = config(
 # Keep workers connecting through a broker restart (common during deploys).
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# ---------------------------------------------------------------------------
+# Development timing overrides (time-compression)
+# ---------------------------------------------------------------------------
+# All default to 0 / production values, so the FROZEN product timings (72h chat
+# window, 24h reveal eligibility, 5-min expiry poll) apply unless explicitly
+# overridden — which only ever happens in local dev. Setting a *_SECONDS var to
+# a positive value shrinks that part of the lifecycle to seconds for live
+# end-to-end testing; EXPIRE_CHATS_INTERVAL_SECONDS speeds the expiry poll to
+# match. Consumed in apps.chats.services.chat_service and apps.reveal.services.
+CHAT_ANONYMOUS_WINDOW_SECONDS_OVERRIDE: int = config(
+    "CHAT_ANONYMOUS_WINDOW_SECONDS", default=0, cast=int
+)
+CHAT_EXTENSION_WINDOW_SECONDS_OVERRIDE: int = config(
+    "CHAT_EXTENSION_WINDOW_SECONDS", default=0, cast=int
+)
+REVEAL_ELIGIBILITY_SECONDS_OVERRIDE: int = config(
+    "REVEAL_ELIGIBILITY_SECONDS", default=0, cast=int
+)
+EXPIRE_CHATS_INTERVAL_SECONDS: float = config(
+    "EXPIRE_CHATS_INTERVAL_SECONDS", default=300.0, cast=float
+)
+
 # Scheduled (Celery Beat) tasks. Asynchronous tasks (push delivery) are enqueued
 # on demand and are not listed here.
 CELERY_BEAT_SCHEDULE = {
     "expire-chats": {
         "task": "apps.chats.tasks.expire_chats",
-        "schedule": 300.0,  # every 5 minutes
+        "schedule": EXPIRE_CHATS_INTERVAL_SECONDS,  # 5 min in prod; dev may shrink
     },
     "cleanup-expired-media": {
         "task": "apps.messaging.tasks.cleanup_expired_media",

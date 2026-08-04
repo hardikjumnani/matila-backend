@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.chats.enums import ChatPhase, ChatStatus, EndReason, ParticipantStatus
@@ -40,6 +40,12 @@ class ChatServiceTests(TestCase):
         self.assertEqual(chat.participants.count(), 2)
         delta = chat.current_phase_ends_at - chat.created_at
         self.assertAlmostEqual(delta.total_seconds(), 72 * 3600, delta=5)
+
+    @override_settings(CHAT_ANONYMOUS_WINDOW_SECONDS_OVERRIDE=120)
+    def test_create_chat_honors_time_compression(self) -> None:
+        chat = self.service.create_chat(self.a, self.b).data
+        delta = chat.current_phase_ends_at - chat.created_at
+        self.assertAlmostEqual(delta.total_seconds(), 120, delta=5)
 
     def test_create_chat_rejects_same_user(self) -> None:
         self.assertTrue(self.service.create_chat(self.a, self.a).failed)

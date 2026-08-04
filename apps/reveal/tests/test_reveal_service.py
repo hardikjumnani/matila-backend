@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.chats.enums import ChatStatus
 from apps.chats.models import Chat
@@ -48,6 +50,15 @@ class RevealServiceTests(TestCase):
         Chat.objects.filter(id=self.chat.id).update(message_count=0)
         result = self.service.submit_intent(chat_id=str(self.chat.id), user=self.a)
         self.assertEqual(result.error_code, "VALIDATION_ERROR")
+
+    @override_settings(REVEAL_ELIGIBILITY_SECONDS_OVERRIDE=100)
+    def test_is_eligible_honors_time_compression(self) -> None:
+        # Count path off; only the compressed time path can make it eligible.
+        Chat.objects.filter(id=self.chat.id).update(
+            message_count=0, created_at=timezone.now() - timedelta(seconds=200)
+        )
+        self.chat.refresh_from_db()
+        self.assertTrue(self.service.is_eligible(self.chat))
 
     def test_single_intent_is_not_mutual(self) -> None:
         result = self.service.submit_intent(chat_id=str(self.chat.id), user=self.a)

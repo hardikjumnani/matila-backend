@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -37,6 +38,17 @@ from apps.common.results import ServiceResult
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_window(override_seconds: int, default_hours: int) -> timedelta:
+    """Chat window duration, honoring the dev time-compression override.
+
+    Returns the frozen ``default_hours`` unless a positive seconds override is
+    configured (local dev only), in which case the compressed value is used.
+    """
+    if override_seconds and override_seconds > 0:
+        return timedelta(seconds=override_seconds)
+    return timedelta(hours=default_hours)
 
 
 class ChatService:
@@ -157,7 +169,11 @@ class ChatService:
             status=ChatStatus.ACTIVE,
             current_phase=ChatPhase.ANONYMOUS,
             status_changed_at=now,
-            current_phase_ends_at=now + timedelta(hours=CHAT_ANONYMOUS_WINDOW_HOURS),
+            current_phase_ends_at=now
+            + _resolve_window(
+                settings.CHAT_ANONYMOUS_WINDOW_SECONDS_OVERRIDE,
+                CHAT_ANONYMOUS_WINDOW_HOURS,
+            ),
         )
         ChatParticipant.objects.bulk_create(
             [
@@ -229,8 +245,9 @@ class ChatService:
             old_status = chat.status
             chat.status = ChatStatus.EXTENDED
             chat.status_changed_at = now
-            chat.current_phase_ends_at = now + timedelta(
-                hours=CHAT_EXTENSION_WINDOW_HOURS
+            chat.current_phase_ends_at = now + _resolve_window(
+                settings.CHAT_EXTENSION_WINDOW_SECONDS_OVERRIDE,
+                CHAT_EXTENSION_WINDOW_HOURS,
             )
             chat.anonymous_chat_extension_count = (
                 F("anonymous_chat_extension_count") + 1

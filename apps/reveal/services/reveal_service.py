@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -70,8 +71,12 @@ class RevealService:
 
     def is_eligible(self, chat) -> bool:
         """Reveal is available after 24h OR 100 exchanged messages (frozen)."""
+        eligibility_seconds = (
+            settings.REVEAL_ELIGIBILITY_SECONDS_OVERRIDE
+            or REVEAL_ELIGIBILITY_HOURS * 3600
+        )
         by_time = timezone.now() - chat.created_at >= timedelta(
-            hours=REVEAL_ELIGIBILITY_HOURS
+            seconds=eligibility_seconds
         )
         by_count = chat.message_count >= REVEAL_ELIGIBILITY_MESSAGE_COUNT
         return by_time or by_count

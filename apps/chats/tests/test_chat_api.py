@@ -91,6 +91,22 @@ class ChatApiTests(TestCase):
         second = self.client.get(f"/api/v1/chats/{self.chat.id}")
         self.assertEqual(second.json()["data"]["other_participant"]["alias"], alias)
 
+    def test_other_participant_exposes_read_pointer(self) -> None:
+        message = Message.objects.create(
+            chat=self.chat,
+            sender=self.a,
+            message_type=MessageType.TEXT,
+            text_content="hi",
+        )
+        # The other participant (b) reads up to that message.
+        ChatService().mark_read(
+            user=self.b, chat_id=str(self.chat.id), last_read_message_id=str(message.id)
+        )
+        response = self.client.get(f"/api/v1/chats/{self.chat.id}")
+        other = response.json()["data"]["other_participant"]
+        self.assertEqual(other["last_read_message_id"], str(message.id))
+        self.assertIsNotNone(other["last_read_at"])
+
     def test_unread_count_counts_only_partner_messages(self) -> None:
         Message.objects.create(
             chat=self.chat,

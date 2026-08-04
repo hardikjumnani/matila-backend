@@ -53,7 +53,9 @@ class ChatSerializer(serializers.Serializer):
         participant = others[0]
         visible = obj.current_phase == ChatPhase.REVEALED
         # A stable anonymous alias so the client always has a label; the real
-        # name is exposed only once identity is visible.
+        # name is exposed only once identity is visible. The read pointer is
+        # exposed regardless of phase (it is a message id, not identity) so the
+        # client can render persistent read receipts across refetch/restart.
         return {
             "user_id": str(participant.user_id),
             "alias": anonymous_alias(str(obj.id), str(participant.user_id)),
@@ -63,6 +65,12 @@ class ChatSerializer(serializers.Serializer):
                 if visible
                 else None
             ),
+            "last_read_message_id": (
+                str(participant.last_read_message_id)
+                if participant.last_read_message_id
+                else None
+            ),
+            "last_read_at": participant.last_read_at,
         }
 
     def get_unread_count(self, obj) -> int:

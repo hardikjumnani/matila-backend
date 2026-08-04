@@ -27,7 +27,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.SUCCESS(
-                f"Approved {user.college_email} → "
+                f"Approved {user.college_email} -> "
                 f"verification_status={user.verification_status}"
             )
         )

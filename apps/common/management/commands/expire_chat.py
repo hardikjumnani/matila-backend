@@ -23,5 +23,5 @@ class Command(BaseCommand):
                 f"expire failed [{result.error_code}]: {result.error_message}"
             )
         self.stdout.write(
-            self.style.SUCCESS(f"Chat {options['chat']} → {result.data.status}")
+            self.style.SUCCESS(f"Chat {options['chat']} -> {result.data.status}")
         )

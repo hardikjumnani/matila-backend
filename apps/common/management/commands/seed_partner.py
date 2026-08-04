@@ -67,7 +67,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Partner {partner.college_email} created; "
-                    f"anonymous chat {result.data.id} ready (owner ↔ partner)."
+                    f"anonymous chat {result.data.id} ready (owner <-> partner)."
                 )
             )
             self.stdout.write(f"chat_id={result.data.id}")
@@ -83,7 +83,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Partner {partner.college_email} created and waiting in "
-                    "matchmaking — have the owner tap 'find match' to pair."
+                    "matchmaking -- have the owner tap 'find match' to pair."
                 )
             )
 

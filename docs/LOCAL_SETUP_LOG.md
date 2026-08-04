@@ -235,3 +235,63 @@ Postgres, Redis (Memurai), venv + deps, migrations, full test suite (267 on
 Postgres), Django (runserver/Daphne), Celery worker + beat, and the Redis
 channel layer are all working locally. Remaining for full end-to-end:
 external integration credentials (Firebase, Razorpay, AWS S3).
+
+---
+
+## Machine migration — new dev box — 2026-08-04
+
+**Context:** The project was moved to a different Windows machine (user profile
+`hardi`, repo at `D:\Projects\Matila\Backend`). Inventory of the new box: venv +
+deps, the Firebase service-account key (`C:/Users/hardi/secrets/…`, project
+`matila-dev`), and PostgreSQL with the **already-migrated** `anonymous_chat` DB
+(`migrate --check` clean) all carried over. Dev settings unchanged.
+
+**Only gap:** Redis was absent (nothing on 6379). Reinstalled **Memurai
+Developer**; verified service Running, port 6379 listening, `PING → PONG`. This
+restores the documented cache + Channels + Celery-broker dependency. Smoke test
+after reinstall: `GET /health/` = 200 and `GET /api/v1/config` = 200 (Redis-backed
+cache path healthy).
+
+**Reversal:** uninstall Memurai (as Step 3).
+
+---
+
+## Dev tunnel for frontend integration — 2026-08-04 (transient, not a deployment)
+
+To let the frontend engineer run sign-in → onboarding against the real backend
+before any Azure deploy, the local server is exposed via a **Cloudflare quick
+tunnel** (standalone `cloudflared.exe`, no install, kept outside the repo):
+
+```
+python manage.py runserver 127.0.0.1:8000 --noreload      # ASGI/Daphne
+cloudflared tunnel --url http://localhost:8000            # → https://<random>.trycloudflare.com
+```
+
+Ephemeral by design: the hostname changes on restart and the tunnel is only live
+while running on this machine. No repo or persistent machine change (beyond the
+Memurai reinstall above). Exposes a `DEBUG=True` dev box with dev-only creds
+(dev Firebase, dev Blob; Razorpay not live) — **shut the tunnel down when not
+actively testing, and don't share the URL beyond the frontend engineer.** A
+stable dev/prod URL + email-link domain lands with the Azure infra phase.
+
+---
+
+## DNS switched to Cloudflare (1.1.1.1) — 2026-08-04
+
+**Symptom:** the Android emulator / host could not resolve the `*.trycloudflare.com`
+tunnel hostname — the ISP resolver (via router `192.168.1.1` → `2401:4900:50:9::…`)
+returned **NXDOMAIN**, while `1.1.1.1` resolved it correctly. The tunnel + backend
+were proven healthy via a DNS-pinned request (`--resolve …:104.16.231.132` →
+`GET /health/` = 200), isolating the fault to DNS. Since the emulator inherits the
+host resolver, this blocked the live window.
+
+**Change (Administrator PowerShell):**
+```powershell
+Set-DnsClientServerAddress -InterfaceIndex 9 -ServerAddresses ("1.1.1.1","1.0.0.1","2606:4700:4700::1111","2606:4700:4700::1001")
+Clear-DnsClientCache
+```
+(`InterfaceIndex 9` = the `Wi-Fi` adapter.) Verified: `Resolve-DnsName` returns the
+`104.16.x` addresses and `GET https://<tunnel>/health/` = 200 without IP pinning.
+Emulator cold-booted afterward to inherit the new resolver.
+
+**Reversal:** `Set-DnsClientServerAddress -InterfaceIndex 9 -ResetServerAddresses`.

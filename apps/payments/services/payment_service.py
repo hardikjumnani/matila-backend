@@ -91,6 +91,15 @@ class PaymentService:
         if not self._chats.is_participant(chat, user):
             return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
 
+        # Prevent a double charge: once this user has a successful payment for
+        # this (chat, purpose), reject a new order. Completion (reveal/extension)
+        # is already idempotent, but the payment itself must not be repeatable in
+        # the window before the effect lands.
+        if Payment.objects.filter(
+            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
+        ).exists():
+            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+
         amount_result = self._resolve_amount(chat, purpose)
         if amount_result.failed:
             return ServiceResult.fail(

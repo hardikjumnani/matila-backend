@@ -133,6 +133,19 @@ class PaymentServiceTests(TestCase):
         payment = Payment.objects.get(provider_order_id=order["order_id"])
         self.assertEqual(payment.status, PaymentStatus.SUCCESS)
 
+    def test_create_order_blocks_double_pay(self) -> None:
+        self._mutual_reveal()
+        with mock.patch(_ORDER, side_effect=_order_stub):
+            order = self._create_order(self.a, PaymentPurpose.REVEAL).data
+        with mock.patch(_VERIFY, return_value=None):
+            self.service.verify_payment(
+                order_id=order["order_id"], payment_id="pay_a", signature="s"
+            )
+        # A second order for the same user+chat+purpose after success is rejected.
+        with mock.patch(_ORDER, side_effect=_order_stub):
+            result = self._create_order(self.a, PaymentPurpose.REVEAL)
+        self.assertEqual(result.error_code, "CONFLICT")
+
     # -- Extension ----------------------------------------------------------
 
     def test_both_extension_payments_extend_chat(self) -> None:

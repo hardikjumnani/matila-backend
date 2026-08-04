@@ -119,6 +119,15 @@ class PaymentService:
             initiated_from=initiated_from,
             status=PaymentStatus.PENDING,
         )
+
+        # Dev bypass: skip the real gateway and hand back a synthetic order id.
+        # The client sees ``dev_bypass: true`` (via _order_payload) and proceeds
+        # straight to verify.
+        if settings.PAYMENTS_DEV_BYPASS:
+            payment.provider_order_id = f"dev_order_{payment.id}"
+            payment.save(update_fields=["provider_order_id"])
+            return ServiceResult.ok(self._order_payload(payment))
+
         try:
             order = gateway.create_order(
                 amount_in_paise=amount,
@@ -166,6 +175,9 @@ class PaymentService:
             "currency": payment.currency,
             "razorpay_key_id": settings.RAZORPAY_KEY_ID,
             "purpose": payment.purpose,
+            # Signals the client to skip the Razorpay SDK and go straight to
+            # verify. Always False in production (gateway is real there).
+            "dev_bypass": settings.PAYMENTS_DEV_BYPASS,
         }
 
     # -- Verification -------------------------------------------------------
@@ -174,14 +186,22 @@ class PaymentService:
         self, *, order_id: str, payment_id: str, signature: str
     ) -> ServiceResult[Payment]:
         """Verify a client-reported payment signature and apply its effects."""
-        try:
-            gateway.verify_payment_signature(
-                order_id=order_id, payment_id=payment_id, signature=signature
-            )
-        except gateway.InvalidPaymentSignature:
-            return ServiceResult.fail(
-                "VALIDATION_ERROR", "Payment signature verification failed."
-            )
+        # Dev bypass: accept the client-reported payment without contacting the
+        # gateway (order/payment ids and signature may be placeholders).
+        if not settings.PAYMENTS_DEV_BYPASS:
+            try:
+                gateway.verify_payment_signature(
+                    order_id=order_id, payment_id=payment_id, signature=signature
+                )
+            except gateway.InvalidPaymentSignature:
+                return ServiceResult.fail(
+                    "VALIDATION_ERROR", "Payment signature verification failed."
+                )
+        else:
+            # The client sends the same placeholder for every bypassed payment,
+            # which would collide on the unique provider_payment_id column;
+            # derive a unique id from the (unique) order id instead.
+            payment_id = f"dev_pay_{order_id}"
 
         payment, already_done = self._apply_success(
             order_id=order_id, payment_id=payment_id, signature=signature

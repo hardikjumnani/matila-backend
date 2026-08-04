@@ -405,6 +405,14 @@ RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID", default="")
 RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET", default="")
 RAZORPAY_WEBHOOK_SECRET: str = config("RAZORPAY_WEBHOOK_SECRET", default="")
 
+# Development-only escape hatch: when enabled, the payment service skips the
+# Razorpay gateway entirely (no order created upstream, no signature verified)
+# and drives the same reveal/extension side effects directly. The create-order
+# response advertises this via ``dev_bypass: true`` so the client can skip the
+# checkout SDK. MUST default to False so production always uses the real gateway;
+# it is turned on only in the development settings module.
+PAYMENTS_DEV_BYPASS: bool = config("PAYMENTS_DEV_BYPASS", default=False, cast=bool)
+
 
 # ---------------------------------------------------------------------------
 # CORS / CSRF

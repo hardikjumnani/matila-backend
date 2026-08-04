@@ -7,7 +7,7 @@ import uuid
 from unittest import mock
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.chats.enums import ChatStatus
 from apps.chats.services.chat_service import ChatService
@@ -183,3 +183,41 @@ class PaymentServiceTests(TestCase):
         with mock.patch(_WEBHOOK, side_effect=InvalidPaymentSignature()):
             result = self.service.process_webhook(body="{}", signature="bad")
         self.assertEqual(result.error_code, "UNAUTHORIZED")
+
+    # -- Dev bypass ---------------------------------------------------------
+
+    def test_order_payload_flags_dev_bypass_false_by_default(self) -> None:
+        self._mutual_reveal()
+        with mock.patch(_ORDER, side_effect=_order_stub):
+            result = self._create_order(self.a, PaymentPurpose.REVEAL)
+        self.assertFalse(result.data["dev_bypass"])
+
+    @override_settings(PAYMENTS_DEV_BYPASS=True)
+    def test_dev_bypass_create_order_skips_gateway(self) -> None:
+        self._mutual_reveal()
+        with mock.patch(_ORDER) as order_mock:
+            result = self._create_order(self.a, PaymentPurpose.REVEAL)
+        order_mock.assert_not_called()
+        self.assertTrue(result.success)
+        self.assertTrue(result.data["dev_bypass"])
+        self.assertTrue(result.data["order_id"].startswith("dev_order_"))
+
+    @override_settings(PAYMENTS_DEV_BYPASS=True)
+    def test_dev_bypass_reveal_completes_without_signature(self) -> None:
+        self._mutual_reveal()
+        order_a = self._create_order(self.a, PaymentPurpose.REVEAL).data
+        order_b = self._create_order(self.b, PaymentPurpose.REVEAL).data
+        with mock.patch(_VERIFY) as verify_mock:
+            self.service.verify_payment(
+                order_id=order_a["order_id"],
+                payment_id="dev_bypass",
+                signature="dev_bypass",
+            )
+            self.service.verify_payment(
+                order_id=order_b["order_id"],
+                payment_id="dev_bypass",
+                signature="dev_bypass",
+            )
+        verify_mock.assert_not_called()
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.REVEALED)

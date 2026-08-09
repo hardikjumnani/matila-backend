@@ -94,6 +94,8 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Bind a correlation id early so it is available to everything downstream.
+    "apps.common.request_id.RequestIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -300,15 +302,21 @@ LOGGING = {
     "formatters": {
         "verbose": {
             "format": (
-                "%(asctime)s [%(levelname)s] %(name)s "
+                "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s "
                 "%(module)s.%(funcName)s:%(lineno)d %(message)s"
             ),
+        },
+    },
+    "filters": {
+        "request_id": {
+            "()": "apps.common.request_id.RequestIDLogFilter",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "filters": ["request_id"],
         },
     },
     "root": {

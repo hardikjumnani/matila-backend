@@ -14,6 +14,7 @@ from typing import Any
 
 from apps.audit.enums import ActorType
 from apps.audit.models import AuditLog
+from apps.common.request_id import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,8 @@ class AuditService:
             entity_id: the affected entity's identifier (stringified UUID/pk).
             actor_id: the actor's identifier ("" for SYSTEM).
             metadata: structured context; never contains secrets or tokens.
-            request_id: correlation id tying the event to a request.
+            request_id: correlation id tying the event to a request; falls back
+                to the current request's id (from the ContextVar) when omitted.
         """
         return AuditLog.objects.create(
             actor_type=actor_type,
@@ -50,7 +52,7 @@ class AuditService:
             entity_type=entity_type,
             entity_id=str(entity_id) if entity_id else "",
             metadata=metadata or {},
-            request_id=request_id,
+            request_id=request_id or get_request_id(),
         )
 
     def log_admin_action(

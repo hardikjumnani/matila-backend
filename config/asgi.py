@@ -28,6 +28,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E402
 from django.conf import settings  # noqa: E402
 
+from apps.common.request_id import RequestIDASGIMiddleware  # noqa: E402
 from apps.users.channels_auth import FirebaseAuthMiddleware  # noqa: E402
 from config.routing import websocket_urlpatterns  # noqa: E402
 
@@ -48,12 +49,15 @@ def build_websocket_router(app, *, debug: bool):
 
 
 # WebSocket connections are authenticated with a Firebase token from the query
-# string; the middleware populates scope["user"].
+# string; the middleware populates scope["user"]. RequestIDASGIMiddleware wraps
+# the outside so a correlation id is bound before origin/auth checks even run.
 _websocket_app = FirebaseAuthMiddleware(URLRouter(websocket_urlpatterns))
 
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": build_websocket_router(_websocket_app, debug=settings.DEBUG),
+        "websocket": RequestIDASGIMiddleware(
+            build_websocket_router(_websocket_app, debug=settings.DEBUG)
+        ),
     }
 )

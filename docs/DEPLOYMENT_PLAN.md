@@ -28,13 +28,19 @@ the simplest reliable fit for that shape at MVP scale.
 
 ---
 
-## Pre-deployment code milestone (do first, locally)
+## Pre-deployment code milestone (do first, locally) — ✅ DONE (`a32c320`)
 **Request-ID correlation** (approved refinement): a middleware that generates/
 accepts an `X-Request-ID`, binds it to the logging context, propagates it to
 Celery tasks and WebSocket connections, and stamps `AuditLog.request_id` — so a
 single request is traceable end-to-end (REST → task → audit → Sentry). Implement
 and test locally before deploying. **Gate:** request id appears in logs, audit
 records, and Sentry events for a traced request; suite still green.
+
+**Status:** shipped in `apps/common/request_id.py` + wiring (middleware, log
+filter, Celery signals, ASGI WS middleware, `AuditService`). Logs + audit
+correlation verified (suite 300 green). The **Sentry-event** half is a guarded
+no-op until `sentry-sdk` lands in **Phase E** — the tag fires automatically once
+the SDK is installed.
 
 ---
 

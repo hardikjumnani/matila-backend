@@ -33,10 +33,19 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 
 ## Deploy to Azure (details in `docs/DEPLOYMENT_PLAN.md`)
 
-- `XX` **Phase A — Provision Azure** — resource group, VM (Ubuntu), PostgreSQL
-  Flexible Server, Azure Cache for Redis, prod Blob account, DNS, NSG.
-- `XX` **Phase B — Deploy the app** — the four processes under systemd (Gunicorn,
-  Daphne, Celery worker, Celery beat); migrate; collectstatic.
+- `OO` **Phase A — Provision Azure** (2026-08-13) — `matila-prod-rg`; one
+  free-tier `B2ats_v2` VM (Ubuntu 22.04) that runs everything; static public IP +
+  Azure DNS label (`matila-prod.centralindia.cloudapp.azure.com`); prod Blob
+  account; NSG (SSH owner-IP only, 80/443 open). **Postgres + Redis self-hosted on
+  the VM** (cost-optimized for max $100-credit runway — replaces Flexible Server +
+  Azure Cache). See `AZURE_PROVISION_LOG.md`.
+- `OO` **Phase B — Deploy the app** (2026-08-18) — code at `/opt/matila`, venv on
+  `requirements/production.txt`; `/etc/matila/env.production` (`0600`); `migrate` +
+  `collectstatic`; systemd units **`matila-asgi`** (Daphne serving REST **and** WS)
+  and **`matila-celery`** (worker + embedded beat via `-B`) — consolidated from
+  four processes to two to fit the 1 GB box; Nginx reverse proxy (HTTP). Gate met:
+  both services active + auto-restart, **survived a reboot**, `/health/` 200
+  end-to-end through Nginx (incl. public FQDN), worker+beat live.
 - `XX` **Phase C — Nginx + TLS + `wss://`** — cert + auto-renew; token-log hygiene.
 - `XX` **Phase D — Runtime config seeding** — prices/flags/questionnaire/versions;
   `ADMIN_EMAILS` allow-list.
@@ -48,6 +57,10 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 
 ---
 
-**Where the pointer sits:** everything through the request-ID milestone is done
-and committed. The next step is **Azure Phase A** (hands-on infra, guided one
-gated phase at a time — see `docs/DEPLOYMENT_PLAN.md`).
+**Where the pointer sits:** Azure Phases A and B are done — the app is running on
+the VM under systemd (Daphne + Celery), reachable over HTTP at
+`http://matila-prod.centralindia.cloudapp.azure.com/health/`. The next step is
+**Phase C — Nginx + TLS + `wss://`** (Let's Encrypt cert so the reverse proxy
+terminates HTTPS and the `X-Forwarded-Proto` header reflects the real scheme;
+right now it's pinned to `https` in the HTTP-only proxy to satisfy
+`SECURE_SSL_REDIRECT`). See `docs/DEPLOYMENT_PLAN.md`.

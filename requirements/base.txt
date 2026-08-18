@@ -32,6 +32,9 @@ azure-storage-blob==12.24.0
 
 # Payments
 razorpay==1.4.2
+# razorpay imports pkg_resources at import time; modern pip no longer installs
+# setuptools into fresh venvs, so pin it explicitly (<81 keeps pkg_resources).
+setuptools==80.10.2
 
 # Cross-origin support for the Flutter client
 django-cors-headers==4.6.0

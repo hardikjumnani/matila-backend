@@ -46,15 +46,29 @@ self-hosted); see `docs/DEPLOYMENT_PLAN.md` / `docs/ROADMAP.md`.
   (`C:\Users\hardi\.ssh\`). **Gate: SSH verified working. PASS.**
 - No swap yet (added in Phase B for the 1 GB constraint).
 
+### A.7 — Prod Blob storage (2026-08-13)
+- Storage account `matilaprodstore` (Standard_LRS, StorageV2, TLS1_2,
+  **`allowBlobPublicAccess=false`**). Private `media` container.
+- Connection string is a **secret** — not stored here. Retrieve on demand for
+  the Phase B env file: `az storage account show-connection-string -g matila-prod-rg -n matilaprodstore -o tsv`
+- Dev `matiladevstore` remains separate/untouched.
+
+### A.8 — DNS (free Azure hostname, Option A)
+- DNS label set on `matila-prod-ip` → **`matila-prod.centralindia.cloudapp.azure.com`**
+  → resolves to `52.140.127.181`. Used for Let's Encrypt TLS in Phase C.
+- (A branded Cloudflare domain can be swapped in later; not required.)
+
 ### Cost so far
 | Resource | ~ Monthly (24/7) |
 |---|---|
 | VM `B2ats_v2` | $0 (free allowance) |
 | Static public IP | ~$3.65 |
 | OS disk (Std SSD 30 GB) | ~$3.00 |
-| **Running total** | **~$6.65/mo** → within $100 for the year |
+| Blob `matilaprodstore` (media, few GB) | ~$0.50 |
+| Azure DNS label | free |
+| **Running total** | **~$7.15/mo** → within $100 for the year |
 
-### Remaining in Phase A
-- **A.7** — prod Blob storage account + private `media` container (~$0.5/mo). *(dev `matiladevstore` stays separate.)*
-- **A.8** — DNS: Cloudflare A-record → `52.140.127.181` (needed for TLS in Phase C).
-- *(A.5 Postgres + A.6 Redis are self-hosted on the VM → folded into **Phase B** deploy.)*
+### Phase A — COMPLETE ✅
+Gate met: all infra deployed; SSH works (from owner IP only); NSG limited to
+22/80/443; FQDN resolves. Postgres + Redis run **on the VM** (localhost-private
+by construction) and are installed in **Phase B**, which is the next step.

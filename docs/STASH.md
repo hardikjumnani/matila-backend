@@ -36,19 +36,6 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
   `payments_enabled` + `reveal_enabled` to **true**, run one controlled low-value
   live transaction, and rehearse rollback.
 
-### 3. Production WebSocket `Origin` policy (before the prod cutover)
-- **What:** prod runs `DEBUG=False`, so Channels' `AllowedHostsOriginValidator` is
-  active and the native mobile socket (which sends no/again a non-matching
-  `Origin`) will **403** on `wss://…/ws/…`. This is the flip-side of the dev-only
-  origin skip (`4c46f9a`).
-- **Why deferred:** only bites once the Flutter client points at prod. Also tracked
-  in `AI_BRIDGE.md` (open coordination items, BE `[50045]`).
-- **Do later** (before the Phase G prod dress rehearsal): pick **(a)** FE sends
-  `Origin: https://matila-prod.centralindia.cloudapp.azure.com` on the handshake,
-  or **(b)** BE adds a prod-safe origin policy for the token-authenticated mobile
-  socket (BE-recommended — native apps have no browser cross-site-WS threat and the
-  socket is already Firebase-authenticated). Implement whichever we agree on.
-
 ### 4. Upgrade prod Python to 3.11+ (before 2026-10-04)
 - **What:** prod runs **Python 3.10.12** (matches the Ubuntu 22.04 system Python).
   `google.api_core` (a `firebase-admin` dependency) warns it will stop shipping
@@ -75,4 +62,9 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
 
 ## Done
 
-_(nothing yet)_
+- **Production WebSocket `Origin` policy** (2026-08-19, Phase G step 0) — prod's
+  `AllowedHostsOriginValidator` was 403-ing the native no-`Origin` socket. Replaced
+  it with `apps/common/ws_origin.py::MobileFriendlyOriginValidator`: no-`Origin`
+  (native) sockets pass through to the Firebase token gate; browser origins are
+  still checked against `ALLOWED_HOSTS`. Verified live (evil origin → 403; no-origin
+  reaches FirebaseAuth). Native app needs no change.

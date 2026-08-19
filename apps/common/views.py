@@ -5,10 +5,10 @@ Operational endpoints that are not tied to any single domain.
 from __future__ import annotations
 
 from django.http import HttpRequest, JsonResponse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_safe
 
 
-@require_GET
+@require_safe
 def health_check(request: HttpRequest) -> JsonResponse:
     """Lightweight liveness probe for load balancers and uptime monitoring.
 
@@ -19,7 +19,7 @@ def health_check(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok"})
 
 
-@require_GET
+@require_safe
 def readiness_check(request: HttpRequest) -> JsonResponse:
     """Deep readiness probe: verifies the database and cache/broker are reachable.
 

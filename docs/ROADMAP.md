@@ -62,14 +62,14 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   live; admin control plane verified live (admin token → `/admin/dashboard/stats`
   200, unauth 401, flag toggle reflects in `/config`; authenticated-non-admin 403
   covered by `test_admin_api`). `ADMIN_EMAILS=hardik.jumnani123@gmail.com`.
-- `~~` **Phase E — Observability** (2026-08-19, all free-tier) — **Sentry** live
+- `OO` **Phase E — Observability** (2026-08-19, all free-tier) — **Sentry** live
   (Django+Celery, errors-only, PII off, `?token=`/auth-header scrubbed); the
   **request-ID tag activates** (verified: a deliberate error carried the
   `request_id`). Deep readiness probe **`/health/ready`** (DB+Redis). Free
   **metrics sampler** (Celery beat, 5-min): Redis memory / Celery backlog / DB
-  connections → logs + Sentry warning on breach. Paid Azure Log Analytics
-  deferred by choice (budget). **Remaining: owner sets up the UptimeRobot monitor
-  on `/health/`, then the stop-service alert test** → flips to `OO`.
+  connections → logs + Sentry warning on breach. **UptimeRobot** monitor on
+  `/health/` (5-min, both admin emails); the stop-service **DOWN→UP alert test
+  passed** (both inboxes). Paid Azure Log Analytics deferred by choice (budget).
 - `XX` **Phase F — Backups & disaster recovery** — prove a point-in-time restore.
 - `XX` **Phase G — Prod end-to-end validation + ~100-user load test.**
 - `XX` **Phase H — Razorpay live + webhook + go-live + rollback rehearsal.**
@@ -80,11 +80,10 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 **HTTPS + `wss://`** at `https://matila-prod.centralindia.cloudapp.azure.com/`
 (valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
 Celery) behind Nginx, with runtime config seeded and the admin control plane
-verified live. **Phase E** is done bar one owner step (Sentry + request-ID
-correlation + deep health + a free metrics sampler are live; the UptimeRobot
-uptime monitor is pending owner setup). Next after that is **Phase F — backups &
-disaster recovery** (prove a Postgres point-in-time restore). See
-`docs/DEPLOYMENT_PLAN.md`.
+verified live, with observability live (Sentry + request-ID correlation + deep
+health + a free metrics sampler + a verified UptimeRobot alert). The next step is
+**Phase F — backups & disaster recovery** (prove a Postgres restore succeeds —
+adapted for our self-hosted DB). See `docs/DEPLOYMENT_PLAN.md`.
 
 > **Frontend coordination (pending):** the Flutter client must switch its base
 > URL to `https://…` and sockets to `wss://…` when pointing at prod (it currently

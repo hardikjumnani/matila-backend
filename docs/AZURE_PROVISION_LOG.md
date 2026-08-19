@@ -302,17 +302,24 @@ to protect the $100 runway. A paid dashboard can be added later if needed.
   ingestion. Verified on prod (`redis ~1.3 MB, backlog 0, db 2`); beat registered
   the task.
 
-### E.4 — Uptime monitoring (UptimeRobot, free) — **pending owner setup**
-- Owner creates an UptimeRobot HTTP(s) monitor on
+### E.4 — Uptime monitoring (UptimeRobot, free) — **done**
+- UptimeRobot HTTP(s) monitor on
   `https://matila-prod.centralindia.cloudapp.azure.com/health/` (5-min interval),
-  alerting `support@matila.in` + `hardik.jumnani123@gmail.com`. Then the
-  stop-`matila-asgi` → alert-fires test closes the gate.
+  alerting `support@matila.in` + `hardik.jumnani123@gmail.com`.
+- **Fix:** UptimeRobot sends **HEAD** by default; `/health/` was `@require_GET`
+  (405) → monitor read "down". Switched both health views to `require_safe`
+  (GET+HEAD) — `e8105f8`. HEAD now 200.
+- **Alert test passed:** stopped `matila-asgi` 05:49–05:56 UTC (~7 min, spanning a
+  5-min check) → **DOWN** email to both inboxes; auto-restart → **UP** email.
+  Confirmed received.
 
 ### E.5 — Verification
 - Deliberate Sentry error sent (`event_id=05314c1e…`) tagged
   `request_id=ed33d3b71deb4495a7b06e1d0c212e65`, PII-scrubbed → confirm in the
   Sentry dashboard. `/health/ready` 200. Sampler + beat live.
 
-### Phase E — status: **mostly complete** (uptime monitor + alert test pending owner)
-Cost unchanged (~$7.15/mo — Sentry/UptimeRobot/sampler are all free). Next after
-the uptime test: **Phase F** — backups & disaster recovery.
+### Phase E — COMPLETE ✅
+Gate met: deliberate error in Sentry with `request_id` (PII-scrubbed); stopping
+`matila-asgi` fired the UptimeRobot alert to both inboxes; core metrics
+(Redis/Celery/DB) sampled with thresholds. Cost unchanged (~$7.15/mo —
+Sentry/UptimeRobot/sampler are all free). Next: **Phase F** — backups & DR.

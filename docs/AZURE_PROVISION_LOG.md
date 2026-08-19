@@ -418,3 +418,52 @@ paid reveal/extension completion was out of scope here.
 Gate met: full frozen journey passes on prod; ~100 concurrent sustained within
 thresholds (the 1000 stress run mapped the ceiling). Cost unchanged (~$7–8/mo;
 test compute was transient). Next: **Phase H** — Razorpay live + webhook + go-live.
+
+---
+
+## Phase H — Payments (Razorpay) in SANDBOX (2026-08-19)
+
+Razorpay account is **in activation review** → only **test** keys available, so
+Phase H wired test keys + validated the full payment flow on prod in sandbox. The
+live-key swap is deferred to go-live (`STASH.md #2`). Validation harness:
+`ops/loadtest/pay_sandbox.py` (secrets passed via env, none committed).
+
+### H.1 — Test keys wired
+- `/etc/matila/env.production`: `RAZORPAY_KEY_ID=rzp_test_…`, `KEY_SECRET`,
+  `WEBHOOK_SECRET` (the last contains a `$`; written via a scp'd Python script so
+  no shell layer expands it — systemd `EnvironmentFile` reads it literally, which
+  the webhook HMAC test later confirmed). Feature flags `payments_enabled` +
+  `reveal_enabled` flipped **ON** for the test window.
+
+### H.2 — Webhook
+- Endpoint `POST /api/v1/payments/webhook` (unauthenticated, HMAC-signed). For the
+  live flow, register it in the Razorpay dashboard (Test/Live) with the matching
+  `RAZORPAY_WEBHOOK_SECRET`. The sandbox validation POSTs signed payloads directly.
+
+### H.3 — Sandbox validation — **21/21 PASS** (headless: client-verify is pure HMAC)
+- **Reveal (15/15):** 105 msgs → eligible → mutual intent → `create-order` returns
+  **real `rzp_test` orders** (`dev_bypass=false`) → paid **one side via `/verify`
+  (client signature), the other via `webhook` (`payment.captured`)** → chat
+  **REVEALED**. Webhook **replay → idempotent**; **bad signature → 401**.
+- **Extension (6/6):** compressed the chat's `current_phase_ends_at` + ran the real
+  `expire_chats` task → **EXPIRED** (no global time-compression left dangling) →
+  `create-order` (CHAT_EXTENSION) → `/verify` + `webhook` → chat **EXTENDED**.
+
+### H.4 — Deploy & rollback runbook
+- **Deploy** (current, scp-based): `scp` changed files to `/opt/matila` →
+  `manage.py migrate --noinput` + `collectstatic --noinput` (via the env) →
+  `sudo systemctl restart matila-asgi matila-celery`. Config/flags change live via
+  the admin API (no deploy).
+- **Rollback:** restore the DB from the latest `backups/` dump (see
+  `docs/RESTORE.md` §A) and/or revert the changed files + restart. Feature flags
+  can be flipped off instantly via the admin API as a fast kill-switch.
+
+### H.5 — Teardown
+- DB restored from the clean dump → `users=1` (admin), test data gone; flags back
+  **OFF** (safe: test-mode payments must never reach real users). **4 Firebase test
+  users deleted.** Razorpay **test keys remain in env**, ready for the live swap.
+
+### Phase H — status: **sandbox COMPLETE** ✅ (live pending Razorpay activation)
+Payment integration proven end-to-end on prod in test mode. Go-live = swap
+test→live keys + one controlled live transaction (`STASH.md #2`). Cost unchanged
+(~$7–8/mo). **All Azure phases A–H are now done bar the live-key swap.**

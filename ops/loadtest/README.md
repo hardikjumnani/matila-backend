@@ -23,6 +23,11 @@ Token minting needs the Firebase service account, so `vm_*.py` run **on the VM**
 - **`loadtest.py`** (workstation) — N users join matchmaking, open wss, exchange
   messages for a duration; reports match/WS-connect rates, ack RTT, errors.
   `python loadtest.py users.json --users N --duration 60 --ramp 60`
+- **`pay_sandbox.py`** (workstation) — validate Razorpay payments end-to-end
+  (create-order → `/verify` + webhook → REVEAL/EXTENSION; idempotency; bad-sig).
+  Secrets via env: `RZP_KEY_SECRET` + `RZP_WEBHOOK_SECRET`. `reveal` stage prints
+  the chat left for the `extend` stage (expire it first via the real
+  `expire_chats` task). `python pay_sandbox.py toks.json reveal|extend <chat_id>`
 
 ## Typical run
 ```

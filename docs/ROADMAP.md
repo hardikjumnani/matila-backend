@@ -86,20 +86,32 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   `max_connections=30` exhausts first (then Daphne 502s + swap) → join 40%, WS 7%.
   Test data wiped via backup→restore. Harness in `ops/loadtest/`; scaling levers
   stashed.
-- `XX` **Phase H — Razorpay live + webhook + go-live + rollback rehearsal.**
+- `~~` **Phase H — Razorpay + webhook + go-live** (2026-08-19, **sandbox done**) —
+  account in activation review, so wired **test keys** (`rzp_test_…`) + webhook
+  secret in prod and validated the full payment flow end-to-end on prod (**21/21**):
+  `create-order` (real `rzp_test` orders) → `/verify` (client-signature) **and**
+  **webhook** (`payment.captured`) completion → **REVEAL** + **EXTENSION**
+  transitions; webhook replay-idempotent; bad signature → 401. Test data wiped via
+  restore; feature flags back OFF; test keys stay in env. **Remaining: swap
+  test→live keys + one controlled live transaction at go-live** (STASH #2, gated on
+  Razorpay activation).
 
 ---
 
-**Where the pointer sits:** Azure Phases A–D are done — the app is live over
+**Where the pointer sits:** Azure Phases A–G are done and Phase H is
+sandbox-validated — the app is live over
 **HTTPS + `wss://`** at `https://matila-prod.centralindia.cloudapp.azure.com/`
 (valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
 Celery) behind Nginx, with runtime config seeded and the admin control plane
 verified live, with observability live (Sentry + request-ID correlation + deep
 health + a free metrics sampler + a verified UptimeRobot alert). Backups & DR are in place (nightly DB dumps to Blob + weekly VM snapshots, a
 restore drill proven — `docs/RESTORE.md`), and prod E2E + load testing passed
-(the frozen journey works on prod; ~100 concurrent users is comfortable). The
-**only remaining step is Phase H — Razorpay live + webhook + go-live & rollback**
-(the paid reveal/extension transitions were deferred to here). See
+(the frozen journey works on prod; ~100 concurrent users is comfortable), and
+Phase H is **validated in sandbox** (Razorpay test keys + webhook; reveal +
+extension proven 21/21 on prod). The backend is effectively **launch-ready** — it
+can soft-launch now with payments OFF; the **only step left for paid go-live is
+swapping the Razorpay test keys for live keys** (+ one controlled live
+transaction) once the account activation clears — **STASH #2**. See
 `docs/DEPLOYMENT_PLAN.md`.
 
 > **Frontend coordination (pending):** the Flutter client must switch its base

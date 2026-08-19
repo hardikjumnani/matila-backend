@@ -368,3 +368,53 @@ to Blob** + **VM snapshots**, with a proven restore. Runbook: `docs/RESTORE.md`.
 Gate met: a restore **succeeded** end-to-end (not just backup existence). Added
 cost is negligible (tiny Blob dumps + incremental snapshots ≈ well under $1/mo) —
 running total still ~$7–8/mo. Next: **Phase G** — prod E2E + ~100-user load test.
+
+---
+
+## Phase G — Prod E2E + load test (2026-08-19)
+
+Harness in `ops/loadtest/`. Tokens minted on the VM (service account); E2E + load
+clients run from a workstation over real HTTPS/wss. Test data isolated by a
+pre-test backup + restore-to-wipe afterward. **Payments deferred to Phase H**, so
+paid reveal/extension completion was out of scope here.
+
+### G.0 — WS origin fix (step 0)
+- `MobileFriendlyOriginValidator` (committed `d40fe98`) — see the STASH "Done"
+  entry. Verified live and again by the E2E's no-Origin `wss` connects.
+
+### G.1 — E2E (full frozen journey, 2 real token'd users) — **30/30 PASS**
+- Firebase `/auth/session` bootstrap → `PATCH /users/me` + complete-onboarding →
+  **real verification** (`gesture` → `upload-college-id` → `upload-gesture-selfie`
+  → `submit`, images to prod Blob) → **admin-API approve** → APPROVED → matchmaking
+  join×2 → match → **`wss://…/ws/chat/{id}/` with NO Origin → 101** → live
+  bidirectional messaging (WS `message.send`→peer `message.new`, and REST send →
+  peer `message.new`) → reveal-eligibility → report→ENDED → rating.
+- Proves TLS, `wss`, DB, Redis (matchmaking + channel layer), Celery, Blob,
+  Firebase, Nginx, and the origin fix — together, on prod.
+- Gotcha found: `complete-onboarding` treats an **empty** `gender_preferences` as
+  missing → must send a non-empty list.
+
+### G.2 — Load 100 concurrent — **PASS (all thresholds beaten)**
+- join 100/100, match 100/100, **WS-connect 100/100**, `msg_ack` 1505/1505
+  (0 send errors), **ack-RTT p50 47 ms / p95 109 ms / p99 172 ms**, 0 errors.
+- Box mid-run: **load 0.37** (2 vCPU), **319 MB free** (no swap), Daphne 108 MB,
+  100 WS held, Redis 3.7 MB, 8 DB connections. Very comfortable headroom.
+
+### G.3 — Load 1000 concurrent — **ceiling found (does not sustain)**
+- join 405/1000, match 39%, **WS-connect 77/1000 (7%)** — mostly nginx **502**
+  (Daphne saturated); ack-RTT p95 **34.7 s**.
+- **First bottleneck = Postgres `max_connections=30`** (`FATAL: remaining
+  connection slots are reserved…`), then single-process Daphne overload + swap
+  (156 MB). CPU load 2.07 (2 vCPU saturated).
+- Scaling levers (PgBouncer / more RAM+connections / multi-worker Daphne / bigger
+  VM) stashed — see `STASH.md #6`. **~100 concurrent is the safe MVP ceiling.**
+
+### G.4 — Teardown
+- DB **restored** from the pre-test dump (`anonymous_chat-20260819-070543Z.dump`)
+  → back to clean baseline (`users=1` admin, `app_config=11`), services active,
+  `/health/ready` 200. **1004 Firebase test users deleted** (admin preserved).
+
+### Phase G — COMPLETE ✅
+Gate met: full frozen journey passes on prod; ~100 concurrent sustained within
+thresholds (the 1000 stress run mapped the ceiling). Cost unchanged (~$7–8/mo;
+test compute was transient). Next: **Phase H** — Razorpay live + webhook + go-live.

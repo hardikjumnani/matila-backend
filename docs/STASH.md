@@ -58,6 +58,23 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
 - **Do later** (when real users + data justify it): enable WAL archiving to Blob,
   take periodic base backups, and document/test a PITR to a target timestamp.
 
+### 6. Scale beyond ~100 concurrent users
+- **What:** Phase G load testing proved the 1 GB `B2ats_v2` handles **~100 concurrent
+  users comfortably** (100% success, ack-RTT p95 109 ms). At **1000** it collapses —
+  the first hard limit is **Postgres `max_connections=30`** (join/message writes get
+  "remaining connection slots reserved…"), then the single Daphne process saturates
+  (nginx 502s) and the box swaps.
+- **Why deferred:** ~100 concurrent is ample for an MVP launch; scaling is a
+  when-usage-grows problem, and bigger compute costs (against the $100 runway).
+- **Do later** (when concurrency demands it), in rough order of value: add
+  **PgBouncer** (pool app→PG connections so `max_connections` isn't the ceiling);
+  raise `max_connections` (needs more RAM); run **multiple Daphne workers**; move to
+  a **larger VM** or managed Postgres. Re-run `ops/loadtest/` to find the new ceiling.
+
+- **Minor:** a WebSocket handshake to a **malformed (non-UUID) `chat_id`** returned
+  HTTP 500 instead of a clean 4004 close (only reachable with a bad client; the app
+  never sends one). Harden the consumer/route if convenient.
+
 ---
 
 ## Done

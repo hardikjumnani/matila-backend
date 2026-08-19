@@ -77,7 +77,15 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   4). **Restore drill PASSED** — a Blob dump restored to a scratch DB with matching
   row counts + clean `migrate --check`. Runbook in `docs/RESTORE.md`. Redis
   ephemeral (not backed up). True WAL-PITR stashed until there's real user data.
-- `XX` **Phase G — Prod end-to-end validation + ~100-user load test.**
+- `OO` **Phase G — Prod E2E + load test** (2026-08-19) — **E2E 30/30 on prod**:
+  Firebase auth → onboarding → real verification (image→Blob) + admin approve →
+  matchmaking → **`wss` (no-Origin, step-0 fix) live bidirectional messaging** →
+  reveal-eligibility → report→ENDED → rating. **Load 100 concurrent: clean pass**
+  (100% join/match/WS-connect, 1505/1505 msg acks, ack-RTT p95 109 ms, 0 errors;
+  box at load 0.37, 319 MB free). **Load 1000: ceiling found** — Postgres
+  `max_connections=30` exhausts first (then Daphne 502s + swap) → join 40%, WS 7%.
+  Test data wiped via backup→restore. Harness in `ops/loadtest/`; scaling levers
+  stashed.
 - `XX` **Phase H — Razorpay live + webhook + go-live + rollback rehearsal.**
 
 ---
@@ -87,9 +95,11 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 (valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
 Celery) behind Nginx, with runtime config seeded and the admin control plane
 verified live, with observability live (Sentry + request-ID correlation + deep
-health + a free metrics sampler + a verified UptimeRobot alert). Backups & DR are in place too (nightly DB dumps to Blob + weekly VM snapshots, a
-restore drill proven — `docs/RESTORE.md`). The next step is **Phase G —
-end-to-end validation on prod + a ~100-user load test**. See
+health + a free metrics sampler + a verified UptimeRobot alert). Backups & DR are in place (nightly DB dumps to Blob + weekly VM snapshots, a
+restore drill proven — `docs/RESTORE.md`), and prod E2E + load testing passed
+(the frozen journey works on prod; ~100 concurrent users is comfortable). The
+**only remaining step is Phase H — Razorpay live + webhook + go-live & rollback**
+(the paid reveal/extension transitions were deferred to here). See
 `docs/DEPLOYMENT_PLAN.md`.
 
 > **Frontend coordination (pending):** the Flutter client must switch its base

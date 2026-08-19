@@ -146,3 +146,72 @@ persist.
 ### Phase B — COMPLETE ✅
 Cost unchanged from Phase A (~$7.15/mo). Next: **Phase C** — Let's Encrypt TLS +
 `wss://` + access-log token hygiene.
+
+---
+
+## Phase C — Nginx, TLS, wss://, log hygiene (2026-08-19)
+
+> **Note:** the SSH source IP had rotated again (`115.99.130.118` → `14.194.79.194`);
+> updated `allow-ssh` before starting (the standing dynamic-IP caveat).
+
+### C.1 — Preflight
+- FQDN still resolves → `52.140.127.181`; port 80 open, 443 free.
+- **certbot 5.7.0** installed via snap (`snap install --classic certbot`).
+- **HSTS hardening (code):** `production.py` had `INCLUDE_SUBDOMAINS`/`PRELOAD`
+  hard-`True`. On the shared `*.cloudapp.azure.com` parent that is unsafe (we
+  don't own siblings; `preload` is effectively irreversible), so both are now
+  `config(..., default=False)` — **off** on this host, re-enable via env on a
+  fully-owned domain. `SECURE_HSTS_SECONDS` stays 1 year.
+
+### C.2 — Certificate (staging first)
+- **Staging** issuance succeeded (validated the HTTP-01 flow without spending the
+  real rate limit), then deleted.
+- **Production** cert issued: `certbot certonly --nginx --cert-name matila -d
+  matila-prod.centralindia.cloudapp.azure.com`. `certonly` so certbot does **not**
+  rewrite our vhost. Cert at `/etc/letsencrypt/live/matila/`, expires **2026-11-17**,
+  issuer Let's Encrypt (E-series). Registration email = `hardik.jumnani123@gmail.com`
+  (the `ADMIN_EMAILS` ops contact).
+
+### C.3 — TLS vhost
+- Rewrote `/etc/nginx/sites-available/matila`:
+  - **:80** → `return 301 https://$host$request_uri` (renewals use the certbot
+    nginx authenticator, which injects the challenge location temporarily).
+  - **:443** `ssl http2` — cert, **TLSv1.2 + TLSv1.3**, ECDHE-only cipher list
+    (no DHE ⇒ no dhparam needed), session cache. `X-Forwarded-Proto $scheme`
+    (was pinned `https` in Phase B). Same `/`, `/ws/` (Upgrade headers), `/static/`.
+- Pushed the updated `production.py` to `/opt/matila` (tarball snapshot, not git),
+  restarted `matila-asgi` to load the new HSTS config, reloaded Nginx.
+
+### C.4 — Token-log hygiene
+- **Nginx:** custom `log_format matila_notoken` logs `"$request_method $uri
+  $server_protocol"` (uses `$uri`, **not** `$request`/`$request_uri`) → the
+  `?token=<jwt>` on `wss://` handshakes never reaches disk.
+- **Daphne:** its access log **did** include the query string (caught a real
+  `"GET /ws/chat/…/?token=…"` line). Fixed by adding **`--access-log /dev/null`**
+  to the `matila-asgi` ExecStart (Nginx is the token-safe log of record).
+- **Verified:** fired a sentinel `?token=` over HTTPS + a wss upgrade, forced a
+  buffer flush via restart → **0** hits in both the Nginx access log and the
+  Daphne journal.
+
+### C.5 — Auto-renewal
+- Deploy hook `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` (reloads
+  Nginx after any successful renewal).
+- `snap.certbot.renew.timer` **active** (fires twice daily).
+- `certbot renew --dry-run` → **"all simulated renewals succeeded."**
+  (An orphaned dry-run from an SSH timeout had to be killed first — it held the
+  flock; `.certbot.lock` files are flock-based and free on process death.)
+
+### C.6 — Gate: **PASS** ✅
+- `https://FQDN/health/` → **200**; `http://FQDN/health/` → **301** to HTTPS.
+- **HSTS** `max-age=31536000` present (no includeSubDomains/preload). `nosniff` present.
+- TLS **1.1 refused; 1.2 + 1.3 accepted**; cert CN matches FQDN, LE issuer.
+- `wss://…/ws/chat/{id}/` upgrade reaches the Channels stack over TLS (app-level
+  `403` on a tokenless probe — the WS path, not the HTTP 404 resolver; full
+  authenticated connect proven earlier in the emulator test).
+- Token hygiene: **0** token hits in Nginx access log and Daphne journal.
+- `renew --dry-run` succeeds; timer active; nginx-reload deploy hook wired.
+
+### Phase C — COMPLETE ✅
+App is now live on **HTTPS + `wss://`**. Cost unchanged (~$7.15/mo; the cert is
+free). Next: **Phase D** — runtime config seeding + `ADMIN_EMAILS` allow-list.
+**Frontend must switch to `https://` + `wss://` before pointing at prod.**

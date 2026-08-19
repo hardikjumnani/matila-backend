@@ -46,7 +46,14 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   four processes to two to fit the 1 GB box; Nginx reverse proxy (HTTP). Gate met:
   both services active + auto-restart, **survived a reboot**, `/health/` 200
   end-to-end through Nginx (incl. public FQDN), worker+beat live.
-- `XX` **Phase C — Nginx + TLS + `wss://`** — cert + auto-renew; token-log hygiene.
+- `OO` **Phase C — Nginx + TLS + `wss://`** (2026-08-19) — Let's Encrypt cert for
+  the FQDN (auto-issued via certbot nginx authenticator, staging-validated first);
+  HTTPS with TLS1.2/1.3 + ECDHE ciphers (SSL-Labs-A config), HTTP→301→HTTPS, HSTS
+  (`max-age=1y`, **no** includeSubDomains/preload on the shared Azure host);
+  `wss://` upgrade proven to the Channels router. **Token-log hygiene:** Nginx logs
+  `$uri` (query stripped) and Daphne's access log is sent to `/dev/null` — verified
+  zero token hits in both. Auto-renew: certbot timer active + nginx-reload deploy
+  hook; `renew --dry-run` succeeds.
 - `XX` **Phase D — Runtime config seeding** — prices/flags/questionnaire/versions;
   `ADMIN_EMAILS` allow-list.
 - `XX` **Phase E — Observability** — Sentry (activates the request-id tag) +
@@ -57,10 +64,13 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 
 ---
 
-**Where the pointer sits:** Azure Phases A and B are done — the app is running on
-the VM under systemd (Daphne + Celery), reachable over HTTP at
-`http://matila-prod.centralindia.cloudapp.azure.com/health/`. The next step is
-**Phase C — Nginx + TLS + `wss://`** (Let's Encrypt cert so the reverse proxy
-terminates HTTPS and the `X-Forwarded-Proto` header reflects the real scheme;
-right now it's pinned to `https` in the HTTP-only proxy to satisfy
-`SECURE_SSL_REDIRECT`). See `docs/DEPLOYMENT_PLAN.md`.
+**Where the pointer sits:** Azure Phases A–C are done — the app is live over
+**HTTPS + `wss://`** at `https://matila-prod.centralindia.cloudapp.azure.com/`
+(valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
+Celery) behind Nginx. The next step is **Phase D — runtime configuration
+seeding** (prices/flags/questionnaire/versions + the `ADMIN_EMAILS` allow-list).
+See `docs/DEPLOYMENT_PLAN.md`.
+
+> **Frontend coordination (pending):** the Flutter client must switch its base
+> URL to `https://…` and sockets to `wss://…` when pointing at prod (it currently
+> targets the dev `http://10.0.2.2:8000` / `ws://` loopback). Not a backend task.

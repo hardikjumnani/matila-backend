@@ -73,8 +73,14 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=31536000, cast=int)
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+# includeSubDomains / preload default OFF: the launch host is an Azure-assigned
+# label under the shared *.cloudapp.azure.com parent, which we do not own and
+# whose sibling subdomains we must not assert HSTS over. `preload` is also
+# effectively irreversible. Enable both via env once on a fully-owned domain.
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False, cast=bool
+)
+SECURE_HSTS_PRELOAD = config("SECURE_HSTS_PRELOAD", default=False, cast=bool)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # JSON-only API surface in production (no browsable API).

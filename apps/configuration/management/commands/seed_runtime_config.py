@@ -63,7 +63,7 @@ APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
     ),
     AppConfigKey.COMMUNITY_GUIDELINES: (
         "Be respectful. No harassment, hate speech, or explicit content. "
-        "Report anything that feels off — every report is reviewed.",
+        "Report anything that feels off - every report is reviewed.",
         "Community guidelines (placeholder — edit via admin).",
     ),
 }

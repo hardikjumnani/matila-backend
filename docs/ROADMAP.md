@@ -54,8 +54,14 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   `$uri` (query stripped) and Daphne's access log is sent to `/dev/null` — verified
   zero token hits in both. Auto-renew: certbot timer active + nginx-reload deploy
   hook; `renew --dry-run` succeeds.
-- `XX` **Phase D — Runtime config seeding** — prices/flags/questionnaire/versions;
-  `ADMIN_EMAILS` allow-list.
+- `OO` **Phase D — Runtime config seeding** (2026-08-19) — idempotent
+  `seed_runtime_config` command persisted 11 `app_config` + 4 `feature_flag`
+  launch values (frozen prices ₹59/₹89, questionnaire v1, gesture pool, versions
+  1.0.0, `support@matila.in`, minimal FAQ/guidelines). **`payments_enabled` +
+  `reveal_enabled` seeded OFF until Phase H.** `/config` serves the launch set
+  live; admin control plane verified live (admin token → `/admin/dashboard/stats`
+  200, unauth 401, flag toggle reflects in `/config`; authenticated-non-admin 403
+  covered by `test_admin_api`). `ADMIN_EMAILS=hardik.jumnani123@gmail.com`.
 - `XX` **Phase E — Observability** — Sentry (activates the request-id tag) +
   request-ID correlation + Azure Monitor + alerts.
 - `XX` **Phase F — Backups & disaster recovery** — prove a point-in-time restore.
@@ -64,12 +70,12 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 
 ---
 
-**Where the pointer sits:** Azure Phases A–C are done — the app is live over
+**Where the pointer sits:** Azure Phases A–D are done — the app is live over
 **HTTPS + `wss://`** at `https://matila-prod.centralindia.cloudapp.azure.com/`
 (valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
-Celery) behind Nginx. The next step is **Phase D — runtime configuration
-seeding** (prices/flags/questionnaire/versions + the `ADMIN_EMAILS` allow-list).
-See `docs/DEPLOYMENT_PLAN.md`.
+Celery) behind Nginx, with runtime config seeded and the admin control plane
+verified live. The next step is **Phase E — Observability** (Sentry + request-ID
+correlation live + Azure Monitor + alerts). See `docs/DEPLOYMENT_PLAN.md`.
 
 > **Frontend coordination (pending):** the Flutter client must switch its base
 > URL to `https://…` and sockets to `wss://…` when pointing at prod (it currently

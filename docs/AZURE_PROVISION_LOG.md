@@ -215,3 +215,57 @@ Cost unchanged from Phase A (~$7.15/mo). Next: **Phase C** — Let's Encrypt TLS
 App is now live on **HTTPS + `wss://`**. Cost unchanged (~$7.15/mo; the cert is
 free). Next: **Phase D** — runtime config seeding + `ADMIN_EMAILS` allow-list.
 **Frontend must switch to `https://` + `wss://` before pointing at prod.**
+
+---
+
+## Phase D — Runtime configuration seeding (2026-08-19)
+
+### D.1 — Seed command
+- New idempotent `apps/configuration/management/commands/seed_runtime_config.py`
+  (`--dry-run` supported). Writes go through `ConfigurationService.set_config` /
+  `.set_flag` (upsert → Redis cache-bust → audit row). Config already has
+  code-level fallbacks; this **persists** launch-intent values to the DB so they
+  are auditable and admin-editable.
+
+### D.2 — Seeded on prod
+- Ran on the VM → **11 `app_config` + 4 `feature_flag`** rows. Prices frozen
+  (5900 / 8900 paise), questionnaire v1, gesture pool, versions 1.0.0,
+  `support@matila.in`, minimal FAQ/guidelines placeholders.
+- **Feature flags:** `image_messages_enabled=true`, `maintenance_mode=false`,
+  **`payments_enabled=false`, `reveal_enabled=false`** — the last two stay OFF
+  until Phase H go-live (prod has placeholder Razorpay keys; see `STASH.md`).
+
+### D.3 — `/config` verified live
+- `GET https://…/api/v1/config` returns the exact launch set (flags, pricing,
+  questionnaire, versions, support email, faq, guidelines).
+- **Encoding note:** confirmed the prod DB is `server_encoding=UTF8` and
+  round-trips Unicode (em-dash + emoji) cleanly via the ORM. An apparent mojibake
+  in `/config` was traced to a **local Windows `python -m json.tool`** decoding
+  the UTF-8 response as cp1252 for display — not a server/DB issue. Kept the
+  guidelines placeholder ASCII regardless.
+
+### D.4 — Admin access verified live
+- `ADMIN_EMAILS=hardik.jumnani123@gmail.com` (set in `env.production`). The admin
+  gate (`IsAdminUser`) allows a Firebase-auth'd user whose `college_email` is on
+  the list. **No bundled admin UI** — the admin surface is the JSON API under
+  `/api/v1/admin/…`; Django's `/admin/` is a separate, unused system (see `STASH.md`).
+- Minted an admin **ID token headlessly** on the VM: Firebase Admin SDK
+  (`create_user` for the admin email + `create_custom_token`) → exchanged for an
+  ID token via Identity Toolkit `signInWithCustomToken` (owner's Firebase **Web
+  API Key**, a public client key — not stored here).
+- Bootstrapped the session (`POST /auth/session` → **201**, created the prod
+  admin user), then `GET /api/v1/admin/dashboard/stats` → **200**; unauthenticated
+  → **401**. Authenticated-non-admin → **403** is covered by `test_admin_api`.
+
+### D.5 — Flag toggle reflects live
+- `PUT /api/v1/admin/feature-flags/maintenance_mode {"value":true}` → **200** →
+  `/config` shows `true`; flipped back to `false` → `/config` shows `false`.
+  Confirms the admin write path + cache invalidation end-to-end.
+
+### D.6 — Gate: **PASS** ✅
+`/config` matches launch intent · admin reaches `/admin/dashboard/stats` (200) /
+unauth 401 / non-admin 403 (tested) · a flag toggle reflects live in `/config`.
+
+### Phase D — COMPLETE ✅
+Cost unchanged (~$7.15/mo). Next: **Phase E** — observability (Sentry, which also
+activates the request-ID tag, + Azure Monitor + alerts).

@@ -24,17 +24,20 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
   Nginx, or drop the route from `config/urls.py` entirely. Decide first whether
   Django admin is ever wanted; if not, remove it outright.
 
-### 2. Razorpay live keys + webhook (Phase H)
-- **What:** prod `/etc/matila/env.production` currently holds **placeholder**
-  Razorpay values (`RAZORPAY_KEY_ID=rzp_placeholder_phase_h`,
-  `KEY_SECRET`/`WEBHOOK_SECRET=placeholder_phase_h`), and the `payments_enabled` /
-  `reveal_enabled` feature flags are seeded **false**.
-- **Why deferred:** real keys + a webhook need the live HTTPS URL (now available)
-  and a controlled go-live — that's Phase H.
-- **Do later** (Phase H): drop real Razorpay key/secret/webhook-secret into
-  `env.production`, register the webhook at the prod HTTPS webhook URL, flip
-  `payments_enabled` + `reveal_enabled` to **true**, run one controlled low-value
-  live transaction, and rehearse rollback.
+### 2. Swap Razorpay TEST → LIVE keys at go-live
+- **What:** Phase H wires **test-mode** keys (`rzp_test_…`) + a test webhook and
+  validates the full payment→reveal/extension flow in sandbox on prod. Live keys
+  are blocked because the Razorpay account is **in activation review**.
+- **Why deferred:** only Live keys are gated by the review; test keys work now, so
+  the integration is built + proven and go-live becomes a key swap.
+- **Do later** (when Razorpay activation clears): in `/etc/matila/env.production`
+  replace the `rzp_test_…` key/secret with the **live** `rzp_live_…` pair;
+  **re-register the webhook in Live mode** (same URL `…/api/v1/payments/webhook`)
+  and update `RAZORPAY_WEBHOOK_SECRET`; restart services; run **one controlled
+  low-value LIVE transaction** end-to-end; confirm monitoring quiet. Only then is
+  the app safe to expose to real paying users. (Until then, if the client is
+  pointed at prod, keep `payments_enabled`/`reveal_enabled` OFF for real users —
+  test-mode payments must never reach real users.)
 
 ### 4. Upgrade prod Python to 3.11+ (before 2026-10-04)
 - **What:** prod runs **Python 3.10.12** (matches the Ubuntu 22.04 system Python).

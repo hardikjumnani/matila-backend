@@ -49,6 +49,18 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
   socket (BE-recommended — native apps have no browser cross-site-WS threat and the
   socket is already Firebase-authenticated). Implement whichever we agree on.
 
+### 4. Upgrade prod Python to 3.11+ (before 2026-10-04)
+- **What:** prod runs **Python 3.10.12** (matches the Ubuntu 22.04 system Python).
+  `google.api_core` (a `firebase-admin` dependency) warns it will stop shipping
+  updates for Python 3.10 after **2026-10-04**.
+- **Why deferred:** 3.10 works fine today; this is about future dependency updates,
+  not a current breakage.
+- **Do later** (before 2026-10-04): install Python 3.11+ on the VM (deadsnakes PPA
+  or a newer base image), rebuild `/opt/matila/.venv` on it, reinstall
+  `requirements/production.txt`, re-run `check --deploy` + a smoke test, restart
+  `matila-asgi` + `matila-celery`. Update the systemd `ExecStart` venv path if it
+  changes.
+
 ---
 
 ## Done

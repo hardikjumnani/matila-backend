@@ -70,7 +70,13 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   connections → logs + Sentry warning on breach. **UptimeRobot** monitor on
   `/health/` (5-min, both admin emails); the stop-service **DOWN→UP alert test
   passed** (both inboxes). Paid Azure Log Analytics deferred by choice (budget).
-- `XX` **Phase F — Backups & disaster recovery** — prove a point-in-time restore.
+- `OO` **Phase F — Backups & disaster recovery** (2026-08-19) — adapted for the
+  self-hosted DB (no managed PITR). **Nightly `pg_dump` → private Blob `backups/`**
+  (systemd timer, 14-day lifecycle retention); **weekly incremental OS-disk
+  snapshot** (VM managed identity + least-priv custom role + systemd timer, keeps
+  4). **Restore drill PASSED** — a Blob dump restored to a scratch DB with matching
+  row counts + clean `migrate --check`. Runbook in `docs/RESTORE.md`. Redis
+  ephemeral (not backed up). True WAL-PITR stashed until there's real user data.
 - `XX` **Phase G — Prod end-to-end validation + ~100-user load test.**
 - `XX` **Phase H — Razorpay live + webhook + go-live + rollback rehearsal.**
 
@@ -81,9 +87,10 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 (valid Let's Encrypt cert, auto-renewing), running under systemd (Daphne +
 Celery) behind Nginx, with runtime config seeded and the admin control plane
 verified live, with observability live (Sentry + request-ID correlation + deep
-health + a free metrics sampler + a verified UptimeRobot alert). The next step is
-**Phase F — backups & disaster recovery** (prove a Postgres restore succeeds —
-adapted for our self-hosted DB). See `docs/DEPLOYMENT_PLAN.md`.
+health + a free metrics sampler + a verified UptimeRobot alert). Backups & DR are in place too (nightly DB dumps to Blob + weekly VM snapshots, a
+restore drill proven — `docs/RESTORE.md`). The next step is **Phase G —
+end-to-end validation on prod + a ~100-user load test**. See
+`docs/DEPLOYMENT_PLAN.md`.
 
 > **Frontend coordination (pending):** the Flutter client must switch its base
 > URL to `https://…` and sockets to `wss://…` when pointing at prod (it currently

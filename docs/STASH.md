@@ -61,6 +61,16 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
   `matila-asgi` + `matila-celery`. Update the systemd `ExecStart` venv path if it
   changes.
 
+### 5. True point-in-time recovery (WAL archiving) for Postgres
+- **What:** current DR is **nightly logical dumps** (`pg_dump` → Blob) — recovery
+  point is "last night" (up to ~24 h of writes lost). True PITR needs continuous
+  **WAL archiving** (`archive_command` → Blob, + `pg_basebackup`), giving
+  any-second recovery.
+- **Why deferred:** heavier to run/store on the 1 GB box, and RPO≈24 h is fine
+  while there's little/no real user data. Chosen deliberately in Phase F.
+- **Do later** (when real users + data justify it): enable WAL archiving to Blob,
+  take periodic base backups, and document/test a PITR to a target timestamp.
+
 ---
 
 ## Done

@@ -323,3 +323,47 @@ Gate met: deliberate error in Sentry with `request_id` (PII-scrubbed); stopping
 `matila-asgi` fired the UptimeRobot alert to both inboxes; core metrics
 (Redis/Celery/DB) sampled with thresholds. Cost unchanged (~$7.15/mo —
 Sentry/UptimeRobot/sampler are all free). Next: **Phase F** — backups & DR.
+
+---
+
+## Phase F — Backups & disaster recovery (2026-08-19)
+
+**Deviation:** the plan assumed Azure PostgreSQL Flexible Server (managed backups +
+PITR). We self-host Postgres on the VM, so Phase F is scheduled **logical backups
+to Blob** + **VM snapshots**, with a proven restore. Runbook: `docs/RESTORE.md`.
+
+### F.1 — Backup storage + retention
+- Private `backups` container in `matilaprodstore` (created by the backup command).
+- **Blob lifecycle rule** `delete-old-backups`: delete `backups/` blobs older than
+  **14 days** (hands-off retention, no prune code).
+
+### F.2/F.3 — Nightly DB backup
+- `apps/common/management/commands/backup_database.py`: `pg_dump -Fc`
+  (`PGPASSWORD` via env, never argv) → upload to `backups/` via the Azure SDK;
+  Sentry-alerts on failure.
+- **systemd** `matila-backup.service` (oneshot, `EnvironmentFile`) +
+  `matila-backup.timer` (`02:30 UTC` daily, `Persistent=true`).
+- ⚠️ Run backups **via the systemd service**, not `set -a; source env.production`
+  — bash `source` splits the storage connection string on its `;`, truncating it
+  (systemd `EnvironmentFile` parses it correctly). Verified: an 86 KB dump uploaded.
+
+### F.4 — Restore drill (**gate**)
+- Downloaded the latest Blob dump → restored into scratch DB `anonymous_chat_restore`
+  → row counts **matched live** (`app_config=11, feature_flags=4, users=1,
+  migrations=31`) and `migrate --check` reported **no pending migrations** → dropped
+  the scratch DB. **Restore proven end-to-end.**
+
+### F.6 — Weekly VM snapshots
+- VM given a **system-assigned managed identity** (`6830c405-…`); least-privilege
+  custom role **"Matila Snapshot Manager"** (snapshots read/write/delete; disks
+  read + begin/endGetAccess — the last two are required for snapshot-by-copy)
+  scoped to the RG.
+- `ops/vm-snapshot.sh` (IMDS token + ARM REST, no `az` on the box) creates an
+  **incremental** OS-disk snapshot and prunes to the newest 4; `matila-vm-snapshot.timer`
+  runs it **weekly (Sun 03:00 UTC)**. Verified: `matila-osdisk-…` snapshot
+  `provisioningState=Succeeded`, incremental.
+
+### Phase F — COMPLETE ✅
+Gate met: a restore **succeeded** end-to-end (not just backup existence). Added
+cost is negligible (tiny Blob dumps + incremental snapshots ≈ well under $1/mo) —
+running total still ~$7–8/mo. Next: **Phase G** — prod E2E + ~100-user load test.

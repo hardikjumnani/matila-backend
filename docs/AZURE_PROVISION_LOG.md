@@ -342,7 +342,8 @@ to Blob** + **VM snapshots**, with a proven restore. Runbook: `docs/RESTORE.md`.
   (`PGPASSWORD` via env, never argv) → upload to `backups/` via the Azure SDK;
   Sentry-alerts on failure.
 - **systemd** `matila-backup.service` (oneshot, `EnvironmentFile`) +
-  `matila-backup.timer` (`02:30 UTC` daily, `Persistent=true`).
+  `matila-backup.timer` (`02:30 IST` = `21:00 UTC` daily, `Persistent=true`;
+  systemd 249 can't express a TZ in `OnCalendar`, so it's written in UTC).
 - ⚠️ Run backups **via the systemd service**, not `set -a; source env.production`
   — bash `source` splits the storage connection string on its `;`, truncating it
   (systemd `EnvironmentFile` parses it correctly). Verified: an 86 KB dump uploaded.
@@ -360,7 +361,7 @@ to Blob** + **VM snapshots**, with a proven restore. Runbook: `docs/RESTORE.md`.
   scoped to the RG.
 - `ops/vm-snapshot.sh` (IMDS token + ARM REST, no `az` on the box) creates an
   **incremental** OS-disk snapshot and prunes to the newest 4; `matila-vm-snapshot.timer`
-  runs it **weekly (Sun 03:00 UTC)**. Verified: `matila-osdisk-…` snapshot
+  runs it **weekly (Sun 03:00 IST = Sat 21:30 UTC)**. Verified: `matila-osdisk-…` snapshot
   `provisioningState=Succeeded`, incremental.
 
 ### Phase F — COMPLETE ✅

@@ -4,8 +4,8 @@ How to recover Matila prod. Two independent safety nets:
 
 | What | Mechanism | Schedule | Retention | Location |
 |---|---|---|---|---|
-| **Database** | `pg_dump -Fc` → Azure Blob | nightly 02:30 UTC (`matila-backup.timer`) | 14 days (Blob lifecycle rule) | `matilaprodstore` / `backups/` |
-| **Whole VM** | incremental OS-disk snapshot | weekly Sun 03:00 UTC (`matila-vm-snapshot.timer`) | newest 4 | RG `matila-prod-rg`, `matila-osdisk-*` |
+| **Database** | `pg_dump -Fc` → Azure Blob | nightly 02:30 IST / 21:00 UTC (`matila-backup.timer`) | 14 days (Blob lifecycle rule) | `matilaprodstore` / `backups/` |
+| **Whole VM** | incremental OS-disk snapshot | weekly Sun 03:00 IST / Sat 21:30 UTC (`matila-vm-snapshot.timer`) | newest 4 | RG `matila-prod-rg`, `matila-osdisk-*` |
 
 **Redis is NOT backed up** — it is an ephemeral cache / broker / channel layer and
 rebuilds itself. After any restore, just ensure `redis-server` is running.
@@ -84,7 +84,7 @@ az vm update -g $RG -n matila-prod-vm --os-disk matila-restored-osdisk
 az vm start -g $RG -n matila-prod-vm
 ```
 
-Then SSH in, confirm the four services (`matila-asgi`, `matila-celery`, `nginx`,
+Then SSH in, confirm the core services (`matila-asgi`, `matila-celery`, `nginx`,
 `postgresql`, `redis-server`) are active, and hit `/health/ready`. If the DB on the
 snapshot is stale relative to the latest nightly dump, follow section A afterward.
 

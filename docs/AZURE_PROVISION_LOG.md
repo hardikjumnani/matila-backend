@@ -269,3 +269,50 @@ unauth 401 / non-admin 403 (tested) · a flag toggle reflects live in `/config`.
 ### Phase D — COMPLETE ✅
 Cost unchanged (~$7.15/mo). Next: **Phase E** — observability (Sentry, which also
 activates the request-ID tag, + Azure Monitor + alerts).
+
+---
+
+## Phase E — Observability (2026-08-19) — all free-tier
+
+Deliberately **budget-first**: paid Azure Log Analytics ingestion is skipped in
+favour of Sentry (free), UptimeRobot (free), and a free in-app metrics sampler,
+to protect the $100 runway. A paid dashboard can be added later if needed.
+
+### E.1 — Sentry (errors only, free tier)
+- `sentry-sdk==2.20.0` in `requirements/production.txt`; installed in the prod venv.
+- Init in `production.py` (guarded on `SENTRY_DSN`): Django + Celery integrations,
+  `send_default_pii=False`, `max_request_body_size="never"`, `traces_sample_rate=0`
+  (errors only), and a `before_send` that strips `Authorization`/`Cookie` headers
+  and redacts `?token=` from URLs (defence in depth vs the Phase-C token hygiene).
+- `SENTRY_DSN` (+ `SENTRY_ENVIRONMENT=production`) added to `/etc/matila/env.production`.
+  DSN is a client (send-only) key; EU-region project.
+- **request-ID correlation auto-activates** — `apps.common.request_id._tag_sentry`
+  tags every event once `sentry_sdk` is importable (no new code).
+
+### E.2 — Deep readiness probe
+- New `/health/ready` (`readiness_check`): checks Postgres + Redis/cache, returns
+  200 or 503 with a per-check breakdown. `/health/` stays shallow for the LB/uptime
+  ping. Verified live → `200 {"database":"ok","cache":"ok"}`.
+
+### E.3 — Free metrics sampler
+- `apps/common/tasks/monitoring.py` → `sample_system_metrics` (Celery beat, every
+  5 min): logs **Redis used_memory**, **Celery backlog** (default-queue depth), and
+  **DB connections** (`pg_stat_activity`); raises a Sentry `warning` on a threshold
+  breach (300 MB / 100 / 24-of-30). Values visible via `journalctl` — no paid
+  ingestion. Verified on prod (`redis ~1.3 MB, backlog 0, db 2`); beat registered
+  the task.
+
+### E.4 — Uptime monitoring (UptimeRobot, free) — **pending owner setup**
+- Owner creates an UptimeRobot HTTP(s) monitor on
+  `https://matila-prod.centralindia.cloudapp.azure.com/health/` (5-min interval),
+  alerting `support@matila.in` + `hardik.jumnani123@gmail.com`. Then the
+  stop-`matila-asgi` → alert-fires test closes the gate.
+
+### E.5 — Verification
+- Deliberate Sentry error sent (`event_id=05314c1e…`) tagged
+  `request_id=ed33d3b71deb4495a7b06e1d0c212e65`, PII-scrubbed → confirm in the
+  Sentry dashboard. `/health/ready` 200. Sampler + beat live.
+
+### Phase E — status: **mostly complete** (uptime monitor + alert test pending owner)
+Cost unchanged (~$7.15/mo — Sentry/UptimeRobot/sampler are all free). Next after
+the uptime test: **Phase F** — backups & disaster recovery.

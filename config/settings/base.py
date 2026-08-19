@@ -404,6 +404,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.configuration.tasks.refresh_configuration_cache",
         "schedule": 600.0,  # every 10 minutes
     },
+    "sample-system-metrics": {
+        "task": "apps.common.tasks.sample_system_metrics",
+        "schedule": 300.0,  # every 5 minutes
+    },
 }
 
 

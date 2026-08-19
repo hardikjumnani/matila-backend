@@ -6,3 +6,7 @@
 
 # Production HTTP (WSGI) server for the REST API
 gunicorn==23.0.0
+
+# Error tracking + correlation (Sentry). Django + Celery integrations; the
+# request-id tag lights up automatically via apps.common.request_id.
+sentry-sdk==2.20.0

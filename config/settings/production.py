@@ -87,3 +87,50 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [  # noqa: F405
     "apps.common.api.renderers.EnvelopeJSONRenderer",
 ]
+
+# --- Error tracking (Sentry) ------------------------------------------------
+# Errors only (no performance traces) to stay well inside the free tier. The
+# request-id correlation tag is applied automatically by
+# apps.common.request_id._tag_sentry once sentry_sdk is importable. PII is off,
+# and before_send strips auth headers + any ?token= from URLs (defence in depth,
+# matching the token-log hygiene from Phase C).
+SENTRY_DSN = config("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import re
+
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    _TOKEN_QS_RE = re.compile(r"(token=)[^&\s]+", re.IGNORECASE)
+
+    def _scrub_sensitive(event, hint):  # noqa: ANN001, ARG001
+        request = event.get("request")
+        if isinstance(request, dict):
+            qs = request.get("query_string")
+            if isinstance(qs, str):
+                request["query_string"] = _TOKEN_QS_RE.sub(r"\1[Filtered]", qs)
+            elif isinstance(qs, list):
+                request["query_string"] = [
+                    [k, "[Filtered]" if str(k).lower() == "token" else v]
+                    for k, v in qs
+                ]
+            url = request.get("url")
+            if isinstance(url, str):
+                request["url"] = _TOKEN_QS_RE.sub(r"\1[Filtered]", url)
+            headers = request.get("headers")
+            if isinstance(headers, dict):
+                for name in list(headers):
+                    if name.lower() in ("authorization", "cookie"):
+                        headers[name] = "[Filtered]"
+        return event
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=config("SENTRY_ENVIRONMENT", default="production"),
+        integrations=[DjangoIntegration(), CeleryIntegration()],
+        send_default_pii=False,
+        max_request_body_size="never",
+        traces_sample_rate=0.0,  # errors only
+        before_send=_scrub_sensitive,
+    )

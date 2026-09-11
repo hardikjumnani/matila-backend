@@ -10,6 +10,7 @@ from apps.payments.api.views import (
     PaymentDetailView,
     PaymentWebhookView,
     VerifyPaymentView,
+    VerifyPurchaseView,
 )
 
 app_name = "payments"
@@ -17,6 +18,11 @@ app_name = "payments"
 urlpatterns = [
     path("payments/create-order", CreateOrderView.as_view(), name="create-order"),
     path("payments/verify", VerifyPaymentView.as_view(), name="verify"),
+    path(
+        "payments/verify-purchase",
+        VerifyPurchaseView.as_view(),
+        name="verify-purchase",
+    ),
     path("payments/webhook", PaymentWebhookView.as_view(), name="webhook"),
     path(
         "chats/<uuid:chat_id>/payments/status",

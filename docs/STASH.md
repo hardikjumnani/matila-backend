@@ -24,20 +24,24 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
   Nginx, or drop the route from `config/urls.py` entirely. Decide first whether
   Django admin is ever wanted; if not, remove it outright.
 
-### 2. Swap Razorpay TEST → LIVE keys at go-live
-- **What:** Phase H wires **test-mode** keys (`rzp_test_…`) + a test webhook and
-  validates the full payment→reveal/extension flow in sandbox on prod. Live keys
-  are blocked because the Razorpay account is **in activation review**.
-- **Why deferred:** only Live keys are gated by the review; test keys work now, so
-  the integration is built + proven and go-live becomes a key swap.
-- **Do later** (when Razorpay activation clears): in `/etc/matila/env.production`
-  replace the `rzp_test_…` key/secret with the **live** `rzp_live_…` pair;
-  **re-register the webhook in Live mode** (same URL `…/api/v1/payments/webhook`)
-  and update `RAZORPAY_WEBHOOK_SECRET`; restart services; run **one controlled
-  low-value LIVE transaction** end-to-end; confirm monitoring quiet. Only then is
-  the app safe to expose to real paying users. (Until then, if the client is
-  pointed at prod, keep `payments_enabled`/`reveal_enabled` OFF for real users —
-  test-mode payments must never reach real users.)
+### 2. Complete Google Play Billing go-live setup
+- **What:** Payments switched **Razorpay → Google Play Billing** (reveal/extension
+  are *digital in-app purchases* → Play policy requires Play Billing; also unblocks
+  the slow Razorpay activation review). **Backend implemented + unit-tested**:
+  `POST /api/v1/payments/verify-purchase {chat_id, purpose, product_id,
+  purchase_token}` verifies the token via the Play Developer API (`gateway_play`)
+  and drives the **same** reveal/extension completion. Razorpay code is **parked**
+  behind `PAYMENT_PROVIDER` (default `google_play`) for web/other platforms later.
+- **Pending (Play Console / Google Cloud — mostly non-code):** create the two
+  **consumable** products (`reveal_unlock` ₹59, `chat_extension` ₹89, IDs in
+  `apps/payments/constants.py`); a **service account** with Android Publisher API
+  access → JSON key on the VM (`0600`) at `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH`; set
+  `GOOGLE_PLAY_PACKAGE_NAME`; app on an **internal test track** + license testers.
+- **Do later** (go-live): finish the above + set the env, restart, run a real
+  **test purchase** (license tester) end-to-end → `verify-purchase` →
+  REVEALED/EXTENDED, then flip `payments_enabled`/`reveal_enabled` on. FE side is
+  tracked via the switch prompt handed to the frontend agent. **Until live: keep
+  the payment flags OFF for real users.**
 
 ### 4. Upgrade prod Python to 3.11+ (before 2026-10-04)
 - **What:** prod runs **Python 3.10.12** (matches the Ubuntu 22.04 system Python).
@@ -77,6 +81,16 @@ gets picked up. When an item is handled, move it to *Done* (or delete it).
 - **Minor:** a WebSocket handshake to a **malformed (non-UUID) `chat_id`** returned
   HTTP 500 instead of a clean 4004 close (only reachable with a bad client; the app
   never sends one). Harden the consumer/route if convenient.
+
+### 7. Google Play refund / void reconciliation
+- **What:** the backend verifies purchases on demand but doesn't yet handle
+  **refunds/chargebacks** (revoke a reveal/extension after Play refunds it).
+- **Why deferred:** the verify path covers MVP; refunds are rare and reconcilable
+  later. (Reveal is a permanent state anyway — a refund would mostly matter for
+  ledger accuracy / abuse.)
+- **Do later:** subscribe to Play **Real-time Developer Notifications** (Cloud
+  Pub/Sub) for voided-purchase / one-time-product events → mark the `Payment`
+  REFUNDED (+ revoke where applicable); or poll the **Voided Purchases API**.
 
 ---
 

@@ -439,6 +439,18 @@ RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID", default="")
 RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET", default="")
 RAZORPAY_WEBHOOK_SECRET: str = config("RAZORPAY_WEBHOOK_SECRET", default="")
 
+# Google Play Billing is the primary provider for the Android app: reveal and
+# extension are *digital in-app purchases*, which Play policy requires be sold via
+# Play Billing. The client buys with the Play SDK and posts the purchase token; the
+# backend verifies it against the Google Play Developer API with a service-account
+# key. ``PAYMENT_PROVIDER`` selects the active provider (Razorpay stays parked for
+# web/other platforms).
+PAYMENT_PROVIDER: str = config("PAYMENT_PROVIDER", default="google_play")
+GOOGLE_PLAY_PACKAGE_NAME: str = config("GOOGLE_PLAY_PACKAGE_NAME", default="")
+GOOGLE_PLAY_SERVICE_ACCOUNT_PATH: str = config(
+    "GOOGLE_PLAY_SERVICE_ACCOUNT_PATH", default=""
+)
+
 # Development-only escape hatch: when enabled, the payment service skips the
 # Razorpay gateway entirely (no order created upstream, no signature verified)
 # and drives the same reveal/extension side effects directly. The create-order

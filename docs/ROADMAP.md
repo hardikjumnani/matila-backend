@@ -92,9 +92,13 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
   `create-order` (real `rzp_test` orders) → `/verify` (client-signature) **and**
   **webhook** (`payment.captured`) completion → **REVEAL** + **EXTENSION**
   transitions; webhook replay-idempotent; bad signature → 401. Test data wiped via
-  restore; feature flags back OFF; test keys stay in env. **Remaining: swap
-  test→live keys + one controlled live transaction at go-live** (STASH #2, gated on
-  Razorpay activation).
+  restore; feature flags back OFF; test keys stay in env. **Then pivoted to Google
+  Play Billing** (Play policy requires it for digital in-app purchases, and it
+  unblocks Razorpay's slow activation review): backend implemented — `POST
+  /payments/verify-purchase` + `gateway_play` (verify a purchase token via the Play
+  Developer API), reusing the same reveal/extension completion; **304 tests green**.
+  Razorpay parked behind `PAYMENT_PROVIDER`. Go-live now needs Play Console setup +
+  a real test purchase — **STASH #2**.
 
 ---
 

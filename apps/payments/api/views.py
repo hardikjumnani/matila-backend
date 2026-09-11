@@ -24,6 +24,7 @@ from apps.payments.api.serializers import (
     CreateOrderRequestSerializer,
     PaymentSerializer,
     VerifyPaymentRequestSerializer,
+    VerifyPurchaseRequestSerializer,
 )
 from apps.payments.services.payment_service import PaymentService
 
@@ -80,6 +81,33 @@ class VerifyPaymentView(APIView):
         if result.failed:
             return service_failure_response(result)
         return Response(PaymentSerializer(result.data).data)
+
+
+class VerifyPurchaseView(APIView):
+    """POST /payments/verify-purchase — verify a Google Play purchase token."""
+
+    permission_classes = [IsAuthenticated]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.service = PaymentService()
+
+    @extend_schema(request=VerifyPurchaseRequestSerializer, responses=PaymentSerializer)
+    def post(self, request: Request) -> Response:
+        serializer = VerifyPurchaseRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result = self.service.verify_google_play_purchase(
+            user=request.user,
+            chat_id=str(data["chat_id"]),
+            purpose=data["purpose"],
+            product_id=data["product_id"],
+            purchase_token=data["purchase_token"],
+            initiated_from=data["initiated_from"],
+        )
+        if result.failed:
+            return service_failure_response(result)
+        return Response(PaymentSerializer(result.data).data, status=201)
 
 
 class PaymentWebhookView(APIView):

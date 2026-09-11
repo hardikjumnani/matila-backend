@@ -44,3 +44,17 @@ class VerifyPaymentRequestSerializer(serializers.Serializer):
     razorpay_order_id = serializers.CharField()
     razorpay_payment_id = serializers.CharField()
     razorpay_signature = serializers.CharField()
+
+
+class VerifyPurchaseRequestSerializer(serializers.Serializer):
+    """Google Play: a client-reported purchase token to verify server-side."""
+
+    chat_id = serializers.UUIDField()
+    purpose = serializers.ChoiceField(choices=PaymentPurpose.choices)
+    product_id = serializers.CharField()
+    purchase_token = serializers.CharField()
+    initiated_from = serializers.ChoiceField(
+        choices=PaymentInitiatedFrom.choices,
+        required=False,
+        default=PaymentInitiatedFrom.CHAT_SCREEN,
+    )

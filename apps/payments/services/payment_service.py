@@ -14,7 +14,7 @@ import json
 import logging
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from apps.chats.enums import ChatStatus
 from apps.common.results import ServiceResult
@@ -22,6 +22,7 @@ from apps.configuration.constants import FeatureFlagKey
 from apps.payments import gateway
 from apps.payments.enums import (
     PaymentInitiatedFrom,
+    PaymentProvider,
     PaymentPurpose,
     PaymentStatus,
 )
@@ -253,6 +254,119 @@ class PaymentService:
         # Always acknowledge: unrecognized/unknown events must not trigger
         # Razorpay retries.
         return ServiceResult.ok({"event": event})
+
+    # -- Google Play Billing -----------------------------------------------
+
+    def verify_google_play_purchase(
+        self,
+        *,
+        user: User,
+        chat_id: str,
+        purpose: PaymentPurpose | str,
+        product_id: str,
+        purchase_token: str,
+        initiated_from: PaymentInitiatedFrom | str,
+    ) -> ServiceResult[Payment]:
+        """Verify a Google Play purchase token and apply its effects.
+
+        Play has no server-created order: the client buys via the Play SDK and
+        reports the purchase token, which we verify against the Play Developer
+        API. Idempotent on the (unique) purchase token, so a retry never
+        double-grants. Reuses the same reveal/extension completion as Razorpay.
+        """
+        from apps.payments import gateway_play
+        from apps.payments.constants import PLAY_PRODUCT_TO_PURPOSE
+
+        if not self._config.is_feature_enabled(FeatureFlagKey.PAYMENTS_ENABLED):
+            return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
+        if PLAY_PRODUCT_TO_PURPOSE.get(product_id) != purpose:
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "Product does not match the requested purpose."
+            )
+
+        chat = self._chats.get_chat(chat_id)
+        if chat is None:
+            return ServiceResult.fail("RESOURCE_NOT_FOUND", "Chat not found.")
+        if not self._chats.is_participant(chat, user):
+            return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
+
+        # Idempotency: this exact purchase token was already recorded.
+        existing = Payment.objects.filter(provider_payment_id=purchase_token).first()
+        if existing is not None:
+            return ServiceResult.ok(existing)
+
+        # Prevent a double charge for the same (user, chat, purpose).
+        if Payment.objects.filter(
+            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
+        ).exists():
+            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+
+        # Eligibility + amount (REVEAL needs mutual intent; EXTENSION needs EXPIRED).
+        amount_result = self._resolve_amount(chat, purpose)
+        if amount_result.failed:
+            return ServiceResult.fail(
+                amount_result.error_code, amount_result.error_message
+            )
+
+        try:
+            info = gateway_play.verify_product_purchase(
+                product_id=product_id, purchase_token=purchase_token
+            )
+        except gateway_play.InvalidPurchase:
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "Purchase verification failed."
+            )
+        except gateway_play.PlayGatewayError:
+            return ServiceResult.fail(
+                "INTERNAL_SERVER_ERROR", "Could not verify the purchase."
+            )
+
+        payment, created = self._record_play_success(
+            user=user,
+            chat=chat,
+            purpose=purpose,
+            amount=amount_result.data,
+            initiated_from=initiated_from,
+            product_id=product_id,
+            purchase_token=purchase_token,
+            order_id=info.get("orderId", ""),
+        )
+        if created:
+            self._handle_successful_payment(payment)
+        return ServiceResult.ok(payment)
+
+    def _record_play_success(
+        self,
+        *,
+        user,
+        chat,
+        purpose,
+        amount,
+        initiated_from,
+        product_id,
+        purchase_token,
+        order_id,
+    ) -> tuple[Payment, bool]:
+        """Create a SUCCESS payment for a verified Play purchase, idempotent on
+        the unique purchase token. Returns (payment, created)."""
+        try:
+            payment = Payment.objects.create(
+                user=user,
+                chat=chat,
+                purpose=purpose,
+                amount_in_paise=amount,
+                currency=_CURRENCY,
+                provider=PaymentProvider.GOOGLE_PLAY,
+                provider_order_id=order_id or None,
+                provider_payment_id=purchase_token,
+                status=PaymentStatus.SUCCESS,
+                initiated_from=initiated_from,
+                metadata={"product_id": product_id},
+            )
+            return payment, True
+        except IntegrityError:
+            # Concurrent verify of the same token lost the race; return the winner.
+            return Payment.objects.get(provider_payment_id=purchase_token), False
 
     @transaction.atomic
     def _apply_success(

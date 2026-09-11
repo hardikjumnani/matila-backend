@@ -19,6 +19,7 @@ class PaymentStatus(models.TextChoices):
 
 class PaymentProvider(models.TextChoices):
     RAZORPAY = "RAZORPAY", "Razorpay"
+    GOOGLE_PLAY = "GOOGLE_PLAY", "Google Play"
 
 
 class PaymentInitiatedFrom(models.TextChoices):

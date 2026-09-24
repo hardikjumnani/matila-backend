@@ -10,6 +10,29 @@ self-hosted); see `docs/DEPLOYMENT_PLAN.md` / `docs/ROADMAP.md`.
 
 ---
 
+> ## ⛔ TORN DOWN — 2026-09-24 (Azure cost → $0)
+> All Azure resources were **deleted** to stop billing. The subscription is now
+> **empty** — both `matila-prod-rg` and `matila-dev-rg` deleted (VM, OS disk, static
+> public IP, NIC, VNet, NSG, Blob storage incl. `media` + `backups`, all 4 OS-disk
+> snapshots, the system-assigned managed identity), plus the subscription-scoped
+> **"Matila Snapshot Manager"** custom role and the free `NetworkWatcherRG`.
+> Verified: `az resource list` → none; `az group list` → none.
+>
+> **Recovery artifacts (local, off-repo):**
+> `D:\Projects\Matila\azure-teardown-backup\` — final DB dump
+> (`anonymous_chat-final-20260923.dump`, custom format), `env.production`
+> (`DJANGO_SECRET_KEY`, DB password, Razorpay test + Sentry + webhook secrets),
+> `firebase.json`, `.dburl`, and `matila-config.tgz` (the systemd units + Nginx
+> site). All code + this log are in git.
+>
+> **To rebuild:** re-provision per the phases below (a fresh free-tier VM, region
+> Central India), reinstall from `requirements/production.txt`, drop the saved
+> secrets back into `/etc/matila/`, restore the DB dump (`pg_restore`), re-apply the
+> systemd/Nginx config, re-issue the Let's Encrypt cert, and re-point DNS. A new
+> VM gets a new public IP + FQDN. The history below is the step-by-step guide.
+
+---
+
 ## Phase A — Provision (2026-08-13)
 
 ### A.1 — Preflight

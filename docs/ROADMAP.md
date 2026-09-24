@@ -11,6 +11,12 @@ users — backend behind HTTPS/`wss://`, Flutter client talking to it.
 
 **Legend:** `OO` = done · `XX` = not done · `~~` = partly done
 
+> **⛔ Live deployment TORN DOWN (2026-09-24)** — all Azure resources were deleted to
+> stop billing (Azure cost → **$0**). The build is complete and everything is
+> rebuildable: code + docs in git, and recovery artifacts (final DB dump, secrets,
+> systemd/Nginx config) saved at `D:\Projects\Matila\azure-teardown-backup\`. Rebuild
+> steps: `docs/AZURE_PROVISION_LOG.md` (see the TORN DOWN banner at its top).
+
 ---
 
 ## Build & validate

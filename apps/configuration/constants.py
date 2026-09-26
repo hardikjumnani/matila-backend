@@ -37,8 +37,8 @@ class FeatureFlagKey:
 
 # Fallback values used when a key has not been seeded in the database.
 APP_CONFIG_DEFAULTS: dict[str, Any] = {
-    AppConfigKey.REVEAL_PRICE_PAISE: 5900,  # FROZEN: reveal is Rs.59 per user.
-    AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 8900,  # FROZEN: extension is Rs.89.
+    AppConfigKey.REVEAL_PRICE_PAISE: 3900,  # CHOSEN: reveal is Rs.39 per user.
+    AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 2900,  # CHOSEN: 2-day extension, Rs.29/user.
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
     # CHOSEN: gesture instructions the verification flow can request. gesture_type

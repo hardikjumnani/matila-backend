@@ -92,13 +92,10 @@ class PaymentService:
         if not self._chats.is_participant(chat, user):
             return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
 
-        # Prevent a double charge: once this user has a successful payment for
-        # this (chat, purpose), reject a new order. Completion (reveal/extension)
-        # is already idempotent, but the payment itself must not be repeatable in
-        # the window before the effect lands.
-        if Payment.objects.filter(
-            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
-        ).exists():
+        # Prevent a double charge within the current window. Reveal is one-time
+        # (ever); a 2-day extension is one-time PER expiry cycle, so it can be
+        # bought again after the chat expires anew.
+        if self._already_paid(user, chat, purpose):
             return ServiceResult.fail("CONFLICT", "You have already paid for this.")
 
         amount_result = self._resolve_amount(chat, purpose)
@@ -156,6 +153,22 @@ class PaymentService:
         payment.provider_order_id = order["id"]
         payment.save(update_fields=["provider_order_id"])
         return ServiceResult.ok(self._order_payload(payment))
+
+    def _already_paid(self, user, chat, purpose) -> bool:
+        """Whether a new order for (user, chat, purpose) must be rejected.
+
+        Reveal is one-time ever. A 2-day extension is one-time **per expiry
+        cycle**: extensions are only bought while the chat is EXPIRED, so a
+        SUCCESS extension payment counts only if it was made since the chat's
+        current EXPIRED transition (``status_changed_at``). Once the chat expires
+        again, a fresh extension can be purchased — enabling indefinite cycles.
+        """
+        qs = Payment.objects.filter(
+            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
+        )
+        if purpose == PaymentPurpose.CHAT_EXTENSION:
+            qs = qs.filter(created_at__gte=chat.status_changed_at)
+        return qs.exists()
 
     def _resolve_amount(
         self, chat, purpose: PaymentPurpose | str
@@ -295,10 +308,8 @@ class PaymentService:
         if existing is not None:
             return ServiceResult.ok(existing)
 
-        # Prevent a double charge for the same (user, chat, purpose).
-        if Payment.objects.filter(
-            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
-        ).exists():
+        # Reveal is one-time; a 2-day extension is one-time per expiry cycle.
+        if self._already_paid(user, chat, purpose):
             return ServiceResult.fail("CONFLICT", "You have already paid for this.")
 
         # Eligibility + amount (REVEAL needs mutual intent; EXTENSION needs EXPIRED).
@@ -419,24 +430,29 @@ class PaymentService:
             self._maybe_extend_chat(str(payment.chat_id))
 
     def _maybe_extend_chat(self, chat_id: str) -> None:
-        """Extend the chat once both participants have paid the extension."""
+        """Extend the chat once both participants have paid for the CURRENT cycle.
+
+        Only extends from EXPIRED (idempotency: a second success — e.g. webhook
+        after verify — cannot extend twice). Counts only extension payments made
+        since this EXPIRED transition, so each 2-day cycle needs its own two
+        payments and prior cycles never pre-satisfy a later one.
+        """
+        chat = self._chats.get_chat(chat_id)
+        if chat is None or chat.status != ChatStatus.EXPIRED:
+            return
+
         paid_users = (
             Payment.objects.filter(
                 chat_id=chat_id,
                 purpose=PaymentPurpose.CHAT_EXTENSION,
                 status=PaymentStatus.SUCCESS,
+                created_at__gte=chat.status_changed_at,
             )
             .values("user")
             .distinct()
             .count()
         )
         if paid_users < 2:
-            return
-
-        chat = self._chats.get_chat(chat_id)
-        # Idempotency guard: only extend from EXPIRED so a second success (e.g.
-        # webhook after verify) cannot extend the window twice.
-        if chat is None or chat.status != ChatStatus.EXPIRED:
             return
 
         result = self._chats.extend_chat(chat_id)

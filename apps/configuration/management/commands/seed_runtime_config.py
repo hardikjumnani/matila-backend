@@ -27,10 +27,10 @@ from apps.configuration.services.configuration_service import ConfigurationServi
 
 # key -> (value, description). Descriptions surface in the admin UI later.
 APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
-    AppConfigKey.REVEAL_PRICE_PAISE: (5900, "Reveal price in paise (frozen: Rs.59)."),
+    AppConfigKey.REVEAL_PRICE_PAISE: (3900, "Reveal price in paise (Rs.39 per user)."),
     AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: (
-        8900,
-        "Chat-extension price in paise (frozen: Rs.89).",
+        2900,
+        "2-day chat-extension price in paise (Rs.29 per user, repeatable).",
     ),
     AppConfigKey.RATING_QUESTIONNAIRE: (
         APP_CONFIG_DEFAULTS[AppConfigKey.RATING_QUESTIONNAIRE],

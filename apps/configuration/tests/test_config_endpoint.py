@@ -19,5 +19,5 @@ class ConfigEndpointTests(TestCase):
         self.assertTrue(body["success"])
         data = body["data"]
         self.assertIn("feature_flags", data)
-        self.assertEqual(data["pricing"]["reveal_price_paise"], 5900)
+        self.assertEqual(data["pricing"]["reveal_price_paise"], 3900)
         self.assertIn("app_version", data)

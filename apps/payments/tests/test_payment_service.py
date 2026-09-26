@@ -170,6 +170,54 @@ class PaymentServiceTests(TestCase):
             result = self._create_order(self.a, PaymentPurpose.CHAT_EXTENSION)
         self.assertEqual(result.error_code, "CONFLICT")
 
+    def _pay_extension(self, user, payment_id) -> None:
+        with mock.patch(_ORDER, side_effect=_order_stub):
+            order = self._create_order(user, PaymentPurpose.CHAT_EXTENSION).data
+        with mock.patch(_VERIFY, return_value=None):
+            self.service.verify_payment(
+                order_id=order["order_id"], payment_id=payment_id, signature="s"
+            )
+
+    def test_extension_blocks_double_pay_within_cycle(self) -> None:
+        self.chats.expire_chat(str(self.chat.id))
+        self._pay_extension(self.a, "pa1")
+        # Same user, same expiry cycle -> a second order is rejected.
+        with mock.patch(_ORDER, side_effect=_order_stub):
+            result = self._create_order(self.a, PaymentPurpose.CHAT_EXTENSION)
+        self.assertEqual(result.error_code, "CONFLICT")
+
+    def test_extension_is_repeatable_per_cycle(self) -> None:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        # Cycle 1: both pay -> EXTENDED.
+        self.chats.expire_chat(str(self.chat.id))
+        self._pay_extension(self.a, "c1a")
+        self._pay_extension(self.b, "c1b")
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
+        self.assertEqual(self.chat.anonymous_chat_extension_count, 1)
+
+        # The 2-day window elapses: backdate cycle-1 payments, then re-expire.
+        Payment.objects.filter(
+            chat=self.chat, purpose=PaymentPurpose.CHAT_EXTENSION
+        ).update(created_at=timezone.now() - timedelta(days=3))
+        self.chats.expire_chat(str(self.chat.id))
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.EXPIRED)
+
+        # Cycle 2: only A pays -> NOT extended (B's cycle-1 payment doesn't count).
+        self._pay_extension(self.a, "c2a")
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.EXPIRED)
+
+        # Cycle 2: B pays too -> extended again (proves indefinite repeat).
+        self._pay_extension(self.b, "c2b")
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
+        self.assertEqual(self.chat.anonymous_chat_extension_count, 2)
+
     # -- Webhook ------------------------------------------------------------
 
     def test_webhook_marks_payment_success(self) -> None:

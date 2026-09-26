@@ -15,9 +15,9 @@ class ConfigurationServiceTests(TestCase):
         cache.clear()
         self.service = ConfigurationService()
 
-    def test_returns_frozen_default_when_unset(self) -> None:
-        self.assertEqual(self.service.get_reveal_price_paise(), 5900)
-        self.assertEqual(self.service.get_chat_extension_price_paise(), 8900)
+    def test_returns_default_when_unset(self) -> None:
+        self.assertEqual(self.service.get_reveal_price_paise(), 3900)
+        self.assertEqual(self.service.get_chat_extension_price_paise(), 2900)
 
     def test_database_value_overrides_default(self) -> None:
         AppConfig.objects.create(key=AppConfigKey.REVEAL_PRICE_PAISE, value=7500)
@@ -46,7 +46,7 @@ class ConfigurationServiceTests(TestCase):
         AppConfig.objects.create(key=AppConfigKey.SUPPORT_EMAIL, value="help@x.edu")
         merged = self.service.get_all_config()
         self.assertEqual(merged[AppConfigKey.SUPPORT_EMAIL], "help@x.edu")
-        self.assertEqual(merged[AppConfigKey.REVEAL_PRICE_PAISE], 5900)
+        self.assertEqual(merged[AppConfigKey.REVEAL_PRICE_PAISE], 3900)
 
     def test_refresh_cache_populates_from_db(self) -> None:
         AppConfig.objects.create(key=AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS, value=42)

@@ -53,10 +53,18 @@ self-hosted); see `docs/DEPLOYMENT_PLAN.md` / `docs/ROADMAP.md`.
 > - **Feature flags `payments_enabled` + `reveal_enabled` are OFF** (as seeded) —
 >   flip them on for a go-live/test window once Google Play billing is validated:
 >   `cd /opt/matila && .venv/bin/python manage.py shell -c "from apps.configuration.services.configuration_service import ConfigurationService as C; c=C(); from apps.configuration.constants import FeatureFlagKey as F; c.set_flag(key=F.REVEAL_ENABLED, value=True); c.set_flag(key=F.PAYMENTS_ENABLED, value=True)"`
-> - **DR NOT yet restored:** the nightly DB-backup timer and weekly VM-snapshot timer
->   (and their Blob `backups` container + managed identity + "Matila Snapshot Manager"
->   custom role) were part of the teardown and are **not** re-created here — restore
->   them separately before relying on automated backups.
+> - **DR RESTORED (2026-09-27, same day):** Phase F is fully back —
+>   - Blob `backups` container + lifecycle rule `delete-old-backups` (14-day retention).
+>   - `matila-backup.timer` (nightly 21:00 UTC / 02:30 IST) → `manage.py backup_database`
+>     `pg_dump -Fc` → Blob. Verified: first dump uploaded (`anonymous_chat-…Z.dump`).
+>   - VM **system-assigned managed identity** (principalId `b9d113ed-…`) + recreated
+>     custom role **"Matila Snapshot Manager"** (`914d325b-…`) assigned at the RG.
+>     ⚠️ `az role assignment` hit a spurious `MissingSubscription`; created the
+>     assignment via **`az rest` PUT** instead. RBAC took ~3 min to propagate.
+>   - `matila-vm-snapshot.timer` (Sat 21:30 UTC / Sun 03:00 IST) → `ops/vm-snapshot.sh`.
+>     Verified: incremental snapshot `matila-osdisk-…Z` → `provisioningState=Succeeded`.
+>   - **Restore drill PASSED:** latest Blob dump → scratch DB → counts matched live
+>     (app_config=14, feature_flags=4, django_migrations=37) → scratch dropped.
 
 ---
 

@@ -33,6 +33,33 @@ self-hosted); see `docs/DEPLOYMENT_PLAN.md` / `docs/ROADMAP.md`.
 
 ---
 
+> ## ✅ REBUILT — 2026-09-27 (live again on the latest backend)
+> Re-provisioned per the phases below on a fresh `B2ats_v2` VM (same region/DNS label).
+> - **New public IP `52.140.113.97`**; **FQDN unchanged** →
+>   `matila-prod.centralindia.cloudapp.azure.com` (DNS label stable, so the FE prod
+>   URL does not change). SSH allow-ssh source IP = `14.194.79.194` (unchanged).
+> - Same infra: `matila-prod-rg`, VNet/subnet/NSG (22 owner-only / 80 / 443),
+>   self-hosted Postgres 14 + Redis 6 + Nginx on the VM, Blob `matilaprodstore`
+>   (`media`), storage connection string rotated into `/etc/matila/env.production`.
+> - **Fresh database** (migrate from scratch + `seed_runtime_config`) rather than the
+>   2026-09-23 dump — the code now has the reveal/decision/coin rework (commit
+>   `be40b08`); prod ran only test data, so a clean schema was preferred. The dump
+>   remains in the local backup if the old data is ever needed.
+> - **Running code = `git archive HEAD` (be40b08)** at `/opt/matila`, TLS re-issued
+>   (Let's Encrypt, cert `matila`, auto-renew timer active). `matila-asgi` +
+>   `matila-celery` (worker+beat) + nginx/postgres/redis all `active` + boot-enabled.
+> - `GET /config` serves the new prices (reveal 3900 / extend 2900 / safe 6900·2900)
+>   and bundle catalog. `/health` 200 over HTTPS; http→301; HSTS on.
+> - **Feature flags `payments_enabled` + `reveal_enabled` are OFF** (as seeded) —
+>   flip them on for a go-live/test window once Google Play billing is validated:
+>   `cd /opt/matila && .venv/bin/python manage.py shell -c "from apps.configuration.services.configuration_service import ConfigurationService as C; c=C(); from apps.configuration.constants import FeatureFlagKey as F; c.set_flag(key=F.REVEAL_ENABLED, value=True); c.set_flag(key=F.PAYMENTS_ENABLED, value=True)"`
+> - **DR NOT yet restored:** the nightly DB-backup timer and weekly VM-snapshot timer
+>   (and their Blob `backups` container + managed identity + "Matila Snapshot Manager"
+>   custom role) were part of the teardown and are **not** re-created here — restore
+>   them separately before relying on automated backups.
+
+---
+
 ## Phase A — Provision (2026-08-13)
 
 ### A.1 — Preflight

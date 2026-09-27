@@ -1,10 +1,10 @@
 """
 Payments domain models.
 
-``Payment`` is an append-only financial ledger. Rows are never updated in place
-except for the controlled status/provider-id transitions driven by
-PaymentService as Razorpay reports outcomes. Provider identifiers are uniquely
-constrained so webhook and client-verify paths remain idempotent.
+``Payment`` is an append-only financial ledger. Rows are never updated in place;
+each verified Google Play purchase is recorded once. Provider identifiers are
+uniquely constrained so the client-verify path is idempotent on the purchase
+token. ``Wallet`` + ``CoinLedger`` hold the coin balances (see CreditService).
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class Payment(UUIDModel):
     provider = models.CharField(
         max_length=15,
         choices=PaymentProvider.choices,
-        default=PaymentProvider.RAZORPAY,
+        default=PaymentProvider.GOOGLE_PLAY,
     )
     # Unique among non-null values; NULLs permitted before the order/payment is
     # created at the provider. Enables idempotent webhook processing.

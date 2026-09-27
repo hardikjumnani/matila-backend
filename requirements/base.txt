@@ -33,10 +33,10 @@ google-auth==2.56.2
 # Object storage (Azure Blob Storage)
 azure-storage-blob==12.24.0
 
-# Payments
-razorpay==1.4.2
-# razorpay imports pkg_resources at import time; modern pip no longer installs
-# setuptools into fresh venvs, so pin it explicitly (<81 keeps pkg_resources).
+# Payments run through Google Play Billing (google-auth handles Play API tokens);
+# no Razorpay SDK. Some deps still import pkg_resources at import time and modern
+# pip no longer installs setuptools into fresh venvs, so pin it (<81 keeps
+# pkg_resources).
 setuptools==80.10.2
 
 # Cross-origin support for the Flutter client

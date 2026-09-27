@@ -83,16 +83,16 @@ APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
     ),
 }
 
-# Launch flag state. Payments + reveal stay OFF until Phase H go-live (prod has
-# placeholder Razorpay keys); flipping them on before then exposes broken flows.
+# Launch flag state. Payments + reveal stay OFF until Google Play Billing is
+# validated on prod; flipping them on before then exposes broken flows.
 FEATURE_FLAG_SEED: dict[str, tuple[bool, str]] = {
     FeatureFlagKey.PAYMENTS_ENABLED: (
         False,
-        "Razorpay payments live? OFF until Phase H go-live.",
+        "Google Play billing live? OFF until billing is validated.",
     ),
     FeatureFlagKey.REVEAL_ENABLED: (
         False,
-        "Paid identity reveal enabled? OFF until Phase H (needs live payments).",
+        "Paid identity reveal enabled? OFF until payments are validated.",
     ),
     FeatureFlagKey.IMAGE_MESSAGES_ENABLED: (True, "Image messages in chat."),
     FeatureFlagKey.MAINTENANCE_MODE: (False, "Global maintenance mode."),

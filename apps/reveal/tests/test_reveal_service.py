@@ -1,9 +1,9 @@
 """
 Decision-round state-machine tests (the reveal/safe/extend/exit matrix).
 
-Payments are driven through the dev-bypass path (create_order + verify_payment),
-which routes success into RevealService.record_payment exactly like production.
-See docs/REVEAL_FLOW_SPEC.md.
+Payments are driven through the real prod paths: standard reveal via pay-with-coin,
+safe reveal / extension via Google Play verify (dev-bypass skips the Play API call).
+Both route success into RevealService.record_payment. See docs/REVEAL_FLOW_SPEC.md.
 """
 
 from __future__ import annotations
@@ -79,18 +79,27 @@ class DecisionFlowTests(TestCase):
             chat_id=str(self.chat.id), user=user, choice=choice
         )
 
-    def _pay_money(self, user, purpose):
-        order = self.pay.create_order(
-            user=user,
-            chat_id=str(self.chat.id),
-            purpose=purpose,
-            initiated_from=PaymentInitiatedFrom.CHAT_SCREEN,
-        )
-        assert order.success, order.error_message
-        return self.pay.verify_payment(
-            order_id=order.data["order_id"],
-            payment_id="dev",
-            signature="dev",
+    def _pay(self, user, purpose):
+        """Pay one side the prod way: coins for REVEAL, Play verify for the rest."""
+        if purpose == PaymentPurpose.REVEAL:
+            self.credits.credit(
+                user=user, coin_type="REVEAL", amount=1,
+                reason="ADMIN_ADJUST", idempotency_key=f"seed:{user.id}:{uuid.uuid4().hex}",
+            )
+            return self.pay.pay_with_coin(
+                user=user, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
+            )
+        if purpose == PaymentPurpose.SAFE_REVEAL:
+            sku = "safe_reveal_female" if user.gender == Gender.FEMALE else "safe_reveal_male"
+            return self.pay.verify_google_play_purchase(
+                user=user, chat_id=str(self.chat.id), purpose=PaymentPurpose.SAFE_REVEAL,
+                product_id=sku, purchase_token=f"tok_{uuid.uuid4().hex}",
+                initiated_from=PaymentInitiatedFrom.CHAT_SCREEN,
+            )
+        return self.pay.verify_google_play_purchase(
+            user=user, chat_id=str(self.chat.id), purpose=PaymentPurpose.CHAT_EXTENSION,
+            product_id="chat_extension", purchase_token=f"tok_{uuid.uuid4().hex}",
+            initiated_from=PaymentInitiatedFrom.CHAT_EXPIRED,
         )
 
     def _round(self) -> DecisionRound:
@@ -207,16 +216,16 @@ class DecisionFlowTests(TestCase):
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.REVEAL)
         self.assertEqual(self._round().phase, DecisionRoundPhase.PAYMENT)
-        self._pay_money(self.boy, PaymentPurpose.REVEAL)
+        self._pay(self.boy, PaymentPurpose.REVEAL)
         self.assertEqual(self._refresh().status, ChatStatus.ACTIVE)  # not until both
-        self._pay_money(self.girl, PaymentPurpose.REVEAL)
+        self._pay(self.girl, PaymentPurpose.REVEAL)
         self.assertEqual(self._refresh().status, ChatStatus.REVEALED)
 
     def test_exit_during_payment_credits_payer_coin(self) -> None:
         self._make_eligible()
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.REVEAL)
-        self._pay_money(self.boy, PaymentPurpose.REVEAL)
+        self._pay(self.boy, PaymentPurpose.REVEAL)
         # Girl exits before paying → boy gets a reveal coin, chat ends.
         self._decide(self.girl, DecisionChoice.EXIT)
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
@@ -230,8 +239,8 @@ class DecisionFlowTests(TestCase):
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.SAFE_REVEAL)
         self.assertEqual(self._round().final_call, FinalCall.SAFE_REVEAL)
-        self._pay_money(self.boy, PaymentPurpose.SAFE_REVEAL)
-        self._pay_money(self.girl, PaymentPurpose.SAFE_REVEAL)
+        self._pay(self.boy, PaymentPurpose.SAFE_REVEAL)
+        self._pay(self.girl, PaymentPurpose.SAFE_REVEAL)
 
     def test_safe_reveal_enters_decision_not_revealed(self) -> None:
         self._reach_safe_decision()
@@ -278,7 +287,7 @@ class DecisionFlowTests(TestCase):
         self._make_eligible()
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.SAFE_REVEAL)
-        self._pay_money(self.girl, PaymentPurpose.SAFE_REVEAL)  # girl pays first
+        self._pay(self.girl, PaymentPurpose.SAFE_REVEAL)  # girl pays first
         self._decide(self.boy, DecisionChoice.EXIT)  # boy bails
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
         # Girl gets a SAFE reveal coin (she paid the safe price).
@@ -290,8 +299,8 @@ class DecisionFlowTests(TestCase):
         self.chats.expire_chat(str(self.chat.id))
         self._decide(self.boy, DecisionChoice.EXTEND)
         self._decide(self.girl, DecisionChoice.EXTEND)
-        self._pay_money(self.boy, PaymentPurpose.CHAT_EXTENSION)
-        self._pay_money(self.girl, PaymentPurpose.CHAT_EXTENSION)
+        self._pay(self.boy, PaymentPurpose.CHAT_EXTENSION)
+        self._pay(self.girl, PaymentPurpose.CHAT_EXTENSION)
         chat = self._refresh()
         self.assertEqual(chat.status, ChatStatus.EXTENDED)
         self.assertEqual(chat.anonymous_chat_extension_count, 1)
@@ -313,7 +322,7 @@ class DecisionFlowTests(TestCase):
         self.chats.expire_chat(str(self.chat.id))
         self._decide(self.boy, DecisionChoice.EXTEND)
         self._decide(self.girl, DecisionChoice.EXTEND)
-        self._pay_money(self.boy, PaymentPurpose.CHAT_EXTENSION)  # only boy pays
+        self._pay(self.boy, PaymentPurpose.CHAT_EXTENSION)  # only boy pays
         DecisionRound.objects.filter(chat=self.chat).update(
             decision_deadline_at=timezone.now() - timedelta(minutes=1)
         )

@@ -8,7 +8,7 @@ sensitive value is ever hard-coded in the codebase.
 
 This module holds configuration common to every environment: database, cache,
 channel layer, Celery, storage, and the external integrations (Firebase, Azure
-Blob Storage, Razorpay, CORS/CSRF). Credentials and endpoints are read from the
+Blob Storage, Google Play Billing, CORS/CSRF). Credentials and endpoints are read from the
 environment; the settings themselves are safe to commit. Environment-specific
 hardening and overrides live in ``development`` and ``production``.
 """
@@ -438,33 +438,24 @@ FIREBASE_TOKEN_CLOCK_SKEW_SECONDS: int = config(
 
 
 # ---------------------------------------------------------------------------
-# Razorpay
+# Google Play Billing (the only payment provider)
 # ---------------------------------------------------------------------------
-# Payment order creation, client-side verification, and webhook signature
-# validation. The webhook secret is separate from the API key secret and is
-# configured in the Razorpay dashboard. Client initialization is in Step 5.
-RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID", default="")
-RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET", default="")
-RAZORPAY_WEBHOOK_SECRET: str = config("RAZORPAY_WEBHOOK_SECRET", default="")
-
-# Google Play Billing is the primary provider for the Android app: reveal and
-# extension are *digital in-app purchases*, which Play policy requires be sold via
-# Play Billing. The client buys with the Play SDK and posts the purchase token; the
-# backend verifies it against the Google Play Developer API with a service-account
-# key. ``PAYMENT_PROVIDER`` selects the active provider (Razorpay stays parked for
-# web/other platforms).
-PAYMENT_PROVIDER: str = config("PAYMENT_PROVIDER", default="google_play")
+# Reveal-related purchases are *digital in-app purchases*, which Play policy
+# requires be sold via Play Billing. The client buys with the Play SDK and posts
+# the purchase token; the backend verifies it against the Google Play Developer
+# API with a service-account key (apps.payments.gateway_play). Standard reveals
+# are funded by coins; safe reveal / extension / store bundles are Play purchases.
+# See docs/REVEAL_FLOW_SPEC.md.
 GOOGLE_PLAY_PACKAGE_NAME: str = config("GOOGLE_PLAY_PACKAGE_NAME", default="")
 GOOGLE_PLAY_SERVICE_ACCOUNT_PATH: str = config(
     "GOOGLE_PLAY_SERVICE_ACCOUNT_PATH", default=""
 )
 
-# Development-only escape hatch: when enabled, the payment service skips the
-# Razorpay gateway entirely (no order created upstream, no signature verified)
-# and drives the same reveal/extension side effects directly. The create-order
-# response advertises this via ``dev_bypass: true`` so the client can skip the
-# checkout SDK. MUST default to False so production always uses the real gateway;
-# it is turned on only in the development settings module.
+# Development-only escape hatch: when enabled, the payment service skips the Play
+# purchase-token verification (verify-purchase / store-purchase accept placeholder
+# tokens) so the harness can drive reveals/extensions without real Play billing.
+# MUST default to False so production always verifies against the Play API; it is
+# turned on only in the development settings module.
 PAYMENTS_DEV_BYPASS: bool = config("PAYMENTS_DEV_BYPASS", default=False, cast=bool)
 
 

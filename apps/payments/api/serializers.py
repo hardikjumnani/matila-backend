@@ -34,18 +34,6 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class CreateOrderRequestSerializer(serializers.Serializer):
-    chat_id = serializers.UUIDField()
-    purpose = serializers.ChoiceField(choices=PaymentPurpose.choices)
-    initiated_from = serializers.ChoiceField(choices=PaymentInitiatedFrom.choices)
-
-
-class VerifyPaymentRequestSerializer(serializers.Serializer):
-    razorpay_order_id = serializers.CharField()
-    razorpay_payment_id = serializers.CharField()
-    razorpay_signature = serializers.CharField()
-
-
 class VerifyPurchaseRequestSerializer(serializers.Serializer):
     """Google Play: a client-reported purchase token to verify server-side."""
 

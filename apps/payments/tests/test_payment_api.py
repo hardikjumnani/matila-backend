@@ -77,24 +77,26 @@ class PaymentApiTests(TestCase):
         self.assertEqual(wallet["data"]["reveal_coins"], 5)
 
     @override_settings(PAYMENTS_DEV_BYPASS=True)
-    def test_create_order_in_payment_phase(self) -> None:
+    def test_verify_purchase_endpoint(self) -> None:
+        # Boy REVEAL + girl SAFE_REVEAL → SAFE_REVEAL payment phase.
         self.reveal.submit_decision(
             chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
         )
         self.reveal.submit_decision(
-            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.REVEAL
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.SAFE_REVEAL
         )
         resp = _client(self.boy).post(
-            "/api/v1/payments/create-order",
+            "/api/v1/payments/verify-purchase",
             {
                 "chat_id": str(self.chat.id),
-                "purpose": "REVEAL",
-                "initiated_from": "CHAT_SCREEN",
+                "purpose": "SAFE_REVEAL",
+                "product_id": "safe_reveal_male",
+                "purchase_token": "tok_boy_1",
             },
             format="json",
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertTrue(resp.json()["data"]["dev_bypass"])
+        self.assertEqual(resp.json()["data"]["amount_in_paise"], 2900)
 
     def test_pay_with_coin_endpoint(self) -> None:
         from apps.payments.services.credit_service import CreditService

@@ -19,9 +19,6 @@ from .base import (
     AZURE_STORAGE_CONTAINER,
     DATABASES,
     FIREBASE_CREDENTIALS_PATH,
-    RAZORPAY_KEY_ID,
-    RAZORPAY_KEY_SECRET,
-    RAZORPAY_WEBHOOK_SECRET,
     REDIS_URL,
     config,
 )
@@ -52,9 +49,8 @@ _REQUIRED_SETTINGS = {
     "FIREBASE_CREDENTIALS_PATH": FIREBASE_CREDENTIALS_PATH,  # auth + push
     "AZURE_STORAGE_CONNECTION_STRING": AZURE_STORAGE_CONNECTION_STRING,  # media
     "AZURE_STORAGE_CONTAINER": AZURE_STORAGE_CONTAINER,  # media
-    "RAZORPAY_KEY_ID": RAZORPAY_KEY_ID,  # payments
-    "RAZORPAY_KEY_SECRET": RAZORPAY_KEY_SECRET,  # payments
-    "RAZORPAY_WEBHOOK_SECRET": RAZORPAY_WEBHOOK_SECRET,  # webhook verification
+    # Google Play billing verification is validated lazily by gateway_play (a
+    # service-account credential), not required at startup.
 }
 _missing = sorted(name for name, value in _REQUIRED_SETTINGS.items() if not value)
 if _missing:

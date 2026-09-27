@@ -44,6 +44,7 @@ REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [  # noqa: F405
 # Permissive CORS for local Flutter development. Locked down in production.
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=bool)
 
-# Skip the Razorpay gateway for local end-to-end testing (reveal/extension
-# complete without a real payment). On by default in development; overridable.
+# Skip Play purchase-token verification for local end-to-end testing (reveal /
+# safe reveal / extension / store complete with placeholder tokens). On by
+# default in development; overridable.
 PAYMENTS_DEV_BYPASS = config("PAYMENTS_DEV_BYPASS", default=True, cast=bool)

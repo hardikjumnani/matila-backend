@@ -24,6 +24,7 @@ from django.utils import timezone
 from apps.chats.constants import (
     CHAT_ANONYMOUS_WINDOW_HOURS,
     CHAT_EXTENSION_WINDOW_HOURS,
+    DECISION_GRACE_HOURS,
 )
 from apps.chats.enums import (
     ChatPhase,
@@ -219,8 +220,23 @@ class ChatService:
             chat.status = ChatStatus.EXPIRED
             # Phase stays ANONYMOUS: identity was never revealed (frozen rule).
             chat.status_changed_at = now
-            chat.save(update_fields=["status", "status_changed_at"])
+            # 24h decision grace before auto-exit (server-authoritative).
+            chat.decision_deadline_at = now + _resolve_window(
+                settings.DECISION_GRACE_SECONDS_OVERRIDE, DECISION_GRACE_HOURS
+            )
+            chat.save(
+                update_fields=[
+                    "status",
+                    "status_changed_at",
+                    "decision_deadline_at",
+                ]
+            )
             self._broadcast_state_change(chat.id, old_status, ChatStatus.EXPIRED)
+
+            # Open the post-expiry decision round (Reveal / Extend / Exit / Safe).
+            from apps.reveal.services.reveal_service import RevealService
+
+            RevealService(chat_service=self).create_expiry_round(chat)
 
         self._notify_participants(
             chat,
@@ -252,12 +268,15 @@ class ChatService:
             chat.anonymous_chat_extension_count = (
                 F("anonymous_chat_extension_count") + 1
             )
+            # Fresh window: clear the expiry decision grace deadline.
+            chat.decision_deadline_at = None
             chat.save(
                 update_fields=[
                     "status",
                     "status_changed_at",
                     "current_phase_ends_at",
                     "anonymous_chat_extension_count",
+                    "decision_deadline_at",
                 ]
             )
             self._broadcast_state_change(chat.id, old_status, ChatStatus.EXTENDED)

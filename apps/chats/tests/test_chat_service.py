@@ -39,7 +39,7 @@ class ChatServiceTests(TestCase):
         self.assertEqual(chat.current_phase, ChatPhase.ANONYMOUS)
         self.assertEqual(chat.participants.count(), 2)
         delta = chat.current_phase_ends_at - chat.created_at
-        self.assertAlmostEqual(delta.total_seconds(), 72 * 3600, delta=5)
+        self.assertAlmostEqual(delta.total_seconds(), 48 * 3600, delta=5)
 
     @override_settings(CHAT_ANONYMOUS_WINDOW_SECONDS_OVERRIDE=120)
     def test_create_chat_honors_time_compression(self) -> None:

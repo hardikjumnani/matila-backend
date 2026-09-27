@@ -35,8 +35,9 @@ class Gender(models.TextChoices):
 
 
 class Intent(models.TextChoices):
+    # FRIENDSHIP is intentionally hidden (see docs/REVEAL_FLOW_SPEC.md); only
+    # RELATIONSHIP and CASUAL are selectable. Matchmaking still filters by intent.
     RELATIONSHIP = "RELATIONSHIP", "Relationship"
-    FRIENDSHIP = "FRIENDSHIP", "Friendship"
     CASUAL = "CASUAL", "Casual"
 
 

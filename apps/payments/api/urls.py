@@ -7,10 +7,14 @@ from django.urls import path
 from apps.payments.api.views import (
     ChatPaymentStatusView,
     CreateOrderView,
+    PayWithCoinView,
     PaymentDetailView,
     PaymentWebhookView,
+    StoreCatalogView,
+    StorePurchaseView,
     VerifyPaymentView,
     VerifyPurchaseView,
+    WalletView,
 )
 
 app_name = "payments"
@@ -23,7 +27,11 @@ urlpatterns = [
         VerifyPurchaseView.as_view(),
         name="verify-purchase",
     ),
+    path("payments/pay-with-coin", PayWithCoinView.as_view(), name="pay-with-coin"),
     path("payments/webhook", PaymentWebhookView.as_view(), name="webhook"),
+    path("store/catalog", StoreCatalogView.as_view(), name="store-catalog"),
+    path("store/purchase", StorePurchaseView.as_view(), name="store-purchase"),
+    path("wallet", WalletView.as_view(), name="wallet"),
     path(
         "chats/<uuid:chat_id>/payments/status",
         ChatPaymentStatusView.as_view(),

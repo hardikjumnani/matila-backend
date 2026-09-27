@@ -79,5 +79,7 @@ class DashboardService:
         return {
             "total_paise": _sum(),
             "reveal_paise": _sum(PaymentPurpose.REVEAL),
+            "safe_reveal_paise": _sum(PaymentPurpose.SAFE_REVEAL),
+            "credit_purchase_paise": _sum(PaymentPurpose.CREDIT_PURCHASE),
             "extension_paise": _sum(PaymentPurpose.CHAT_EXTENSION),
         }

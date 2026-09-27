@@ -381,6 +381,10 @@ CHAT_EXTENSION_WINDOW_SECONDS_OVERRIDE: int = config(
 REVEAL_ELIGIBILITY_SECONDS_OVERRIDE: int = config(
     "REVEAL_ELIGIBILITY_SECONDS", default=0, cast=int
 )
+# Post-expiry decision grace (24h) before auto-exit; overridable for testing.
+DECISION_GRACE_SECONDS_OVERRIDE: int = config(
+    "DECISION_GRACE_SECONDS", default=0, cast=int
+)
 EXPIRE_CHATS_INTERVAL_SECONDS: float = config(
     "EXPIRE_CHATS_INTERVAL_SECONDS", default=300.0, cast=float
 )
@@ -391,6 +395,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-chats": {
         "task": "apps.chats.tasks.expire_chats",
         "schedule": EXPIRE_CHATS_INTERVAL_SECONDS,  # 5 min in prod; dev may shrink
+    },
+    "auto-exit-stale-decisions": {
+        "task": "apps.reveal.tasks.auto_exit_stale_decisions",
+        "schedule": EXPIRE_CHATS_INTERVAL_SECONDS,  # same cadence as expiry
     },
     "cleanup-expired-media": {
         "task": "apps.messaging.tasks.cleanup_expired_media",

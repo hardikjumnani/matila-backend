@@ -15,6 +15,8 @@ from django.utils import timezone
 from apps.common.models import UUIDModel
 
 from .enums import (
+    CoinLedgerReason,
+    CoinType,
     PaymentInitiatedFrom,
     PaymentProvider,
     PaymentPurpose,
@@ -30,10 +32,13 @@ class Payment(UUIDModel):
         on_delete=models.PROTECT,
         related_name="payments",
     )
+    # Null for store bundle (CREDIT_PURCHASE) payments, which are not chat-bound.
     chat = models.ForeignKey(
         "chats.Chat",
         on_delete=models.PROTECT,
         related_name="payments",
+        null=True,
+        blank=True,
     )
 
     purpose = models.CharField(max_length=15, choices=PaymentPurpose.choices)
@@ -83,4 +88,75 @@ class Payment(UUIDModel):
     def __str__(self) -> str:
         return (
             f"Payment<{self.id}> {self.purpose} {self.status} {self.amount_in_paise}p"
+        )
+
+
+class Wallet(UUIDModel):
+    """Per-user coin balances. Mutated only via CreditService, which writes an
+    idempotent CoinLedger row for every change (never bare balance edits)."""
+
+    user = models.OneToOneField(
+        "users.User",
+        on_delete=models.PROTECT,
+        related_name="wallet",
+    )
+    reveal_coins = models.PositiveIntegerField(default=0)
+    safe_reveal_coins = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "wallets"
+
+    def __str__(self) -> str:
+        return (
+            f"Wallet<{self.id}> user={self.user_id} "
+            f"reveal={self.reveal_coins} safe={self.safe_reveal_coins}"
+        )
+
+
+class CoinLedger(UUIDModel):
+    """Append-only wallet ledger. ``idempotency_key`` is unique so a retried
+    credit/consume can never double-apply."""
+
+    wallet = models.ForeignKey(
+        Wallet,
+        on_delete=models.PROTECT,
+        related_name="ledger",
+    )
+    coin_type = models.CharField(max_length=15, choices=CoinType.choices)
+    delta = models.IntegerField()  # +N credit/purchase, -1 consume
+    balance_after = models.PositiveIntegerField()
+    reason = models.CharField(max_length=25, choices=CoinLedgerReason.choices)
+
+    chat = models.ForeignKey(
+        "chats.Chat",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="coin_ledger",
+    )
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="coin_ledger",
+    )
+    # Deterministic key deduping retries: e.g. "bundle:<token>",
+    # "cancel:<round>:<user>", "consume:<round>:<user>:<coin_type>".
+    idempotency_key = models.CharField(max_length=255, unique=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "coin_ledger"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["wallet", "coin_type"], name="idx_ledger_wallet_coin"),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"CoinLedger<{self.id}> {self.coin_type} {self.delta:+d} "
+            f"-> {self.balance_after} ({self.reason})"
         )

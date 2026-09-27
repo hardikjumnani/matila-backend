@@ -12,7 +12,7 @@ from apps.messaging.models import Message
 from apps.notifications.models import DeviceToken, Notification
 from apps.payments.models import Payment
 from apps.ratings.models import Rating
-from apps.reveal.models import RevealIntent
+from apps.reveal.models import DecisionRound, ParticipantDecision
 from apps.users.enums import AccountStatus
 from apps.users.models import User
 from apps.users.services.erasure_service import UserErasureService
@@ -52,7 +52,8 @@ class UserErasureServiceTests(TestCase):
             user=self.user, token="tok", device_id="d1", platform="ANDROID"
         )
         Notification.objects.create(user=self.user, type="x", title="hi")
-        RevealIntent.objects.create(chat=self.chat, user=self.user)
+        _round = DecisionRound.objects.create(chat=self.chat, trigger="EXPIRY")
+        ParticipantDecision.objects.create(round=_round, user=self.user)
         MatchQueue.objects.create(user=self.user, intent="RELATIONSHIP")
         Rating.objects.create(
             chat=self.chat, rated_by=self.user, rated_user=self.other,
@@ -74,7 +75,7 @@ class UserErasureServiceTests(TestCase):
         self.assertEqual(VerificationRequest.objects.filter(user=self.user).count(), 0)
         self.assertEqual(DeviceToken.objects.filter(user=self.user).count(), 0)
         self.assertEqual(Notification.objects.filter(user=self.user).count(), 0)
-        self.assertEqual(RevealIntent.objects.filter(user=self.user).count(), 0)
+        self.assertEqual(ParticipantDecision.objects.filter(user=self.user).count(), 0)
         self.assertEqual(MatchQueue.objects.filter(user=self.user).count(), 0)
         self.assertEqual(ChatParticipant.objects.filter(user=self.user).count(), 0)
         self.assertEqual(Rating.objects.filter(rated_by=self.user).count(), 0)

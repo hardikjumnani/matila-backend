@@ -58,3 +58,20 @@ class VerifyPurchaseRequestSerializer(serializers.Serializer):
         required=False,
         default=PaymentInitiatedFrom.CHAT_SCREEN,
     )
+
+
+class StorePurchaseRequestSerializer(serializers.Serializer):
+    """Google Play: buy a standard-reveal bundle → grants reveal_coins."""
+
+    product_id = serializers.CharField()
+    purchase_token = serializers.CharField()
+
+
+class PayWithCoinRequestSerializer(serializers.Serializer):
+    chat_id = serializers.UUIDField()
+    purpose = serializers.ChoiceField(
+        choices=[
+            (PaymentPurpose.REVEAL, "Reveal"),
+            (PaymentPurpose.SAFE_REVEAL, "Safe reveal"),
+        ]
+    )

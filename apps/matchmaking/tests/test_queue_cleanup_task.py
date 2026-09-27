@@ -30,13 +30,13 @@ class CleanupStaleMatchQueueTests(TestCase):
     def test_times_out_stale_entries(self) -> None:
         entry = MatchQueue.objects.create(
             user=_user(),
-            intent=Intent.FRIENDSHIP,
+            intent=Intent.RELATIONSHIP,
             status=MatchQueueStatus.SEARCHING,
             last_heartbeat_at=timezone.now() - timedelta(hours=1),
         )
         fresh = MatchQueue.objects.create(
             user=_user(),
-            intent=Intent.FRIENDSHIP,
+            intent=Intent.RELATIONSHIP,
             status=MatchQueueStatus.SEARCHING,
             last_heartbeat_at=timezone.now(),
         )

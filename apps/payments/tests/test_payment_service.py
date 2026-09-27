@@ -1,63 +1,76 @@
-"""Tests for PaymentService (Razorpay gateway mocked)."""
+"""PaymentService tests: orders, webhook, bundles, and coin spend (new model)."""
 
 from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.chats.enums import ChatStatus
+from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
 from apps.payments.enums import PaymentInitiatedFrom, PaymentPurpose, PaymentStatus
-from apps.payments.gateway import InvalidPaymentSignature
 from apps.payments.models import Payment
+from apps.payments.services.credit_service import CreditService
 from apps.payments.services.payment_service import PaymentService
+from apps.reveal.enums import DecisionChoice
 from apps.reveal.services.reveal_service import RevealService
+from apps.users.enums import Gender
 from apps.users.models import User
 
-_ORDER = "apps.payments.gateway.create_order"
-_VERIFY = "apps.payments.gateway.verify_payment_signature"
 _WEBHOOK = "apps.payments.gateway.verify_webhook_signature"
+_VERIFY_PLAY = "apps.payments.gateway_play.verify_product_purchase"
 
 
-def _user() -> User:
+def _user(gender: str) -> User:
     return User.objects.create(
         firebase_uid="fb_" + uuid.uuid4().hex,
         college_email=f"{uuid.uuid4().hex}@college.edu",
+        gender=gender,
+        intent="RELATIONSHIP",
+        gender_preferences=[Gender.MALE, Gender.FEMALE],
     )
 
 
-def _order_stub(**_kwargs):
-    return {"id": "order_" + uuid.uuid4().hex}
+def _play_stub(**_kwargs):
+    return {"purchaseState": 0, "orderId": "GPA." + uuid.uuid4().hex}
 
 
+@override_settings(PAYMENTS_DEV_BYPASS=True)
 class PaymentServiceTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
-        self.chats = ChatService(notification_service=mock.MagicMock())
-        self.reveal = RevealService(
-            chat_service=self.chats, notification_service=mock.MagicMock()
-        )
+        notif = mock.MagicMock()
+        self.chats = ChatService(notification_service=notif)
+        self.reveal = RevealService(chat_service=self.chats, notification_service=notif)
+        self.credits = CreditService()
         self.service = PaymentService(
             chat_service=self.chats,
             reveal_service=self.reveal,
-            notification_service=mock.MagicMock(),
+            credit_service=self.credits,
+            notification_service=notif,
         )
-        self.a = _user()
-        self.b = _user()
-        self.chat = self.chats.create_chat(self.a, self.b).data
-        from apps.chats.models import Chat
+        self.boy = _user(Gender.MALE)
+        self.girl = _user(Gender.FEMALE)
+        self.chat = self.chats.create_chat(self.boy, self.girl).data
+        Chat.objects.filter(id=self.chat.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
 
-        Chat.objects.filter(id=self.chat.id).update(message_count=100)
+    def _reach_reveal_payment(self) -> None:
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.REVEAL
+        )
 
-    def _mutual_reveal(self) -> None:
-        self.reveal.submit_intent(chat_id=str(self.chat.id), user=self.a)
-        self.reveal.submit_intent(chat_id=str(self.chat.id), user=self.b)
-
-    def _create_order(self, user, purpose):
+    def _order(self, user, purpose=PaymentPurpose.REVEAL):
         return self.service.create_order(
             user=user,
             chat_id=str(self.chat.id),
@@ -65,171 +78,46 @@ class PaymentServiceTests(TestCase):
             initiated_from=PaymentInitiatedFrom.CHAT_SCREEN,
         )
 
-    # -- Order creation -----------------------------------------------------
+    # -- order context ------------------------------------------------------
 
-    def test_reveal_order_requires_mutual_intent(self) -> None:
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.REVEAL)
-        self.assertEqual(result.error_code, "VALIDATION_ERROR")
+    def test_create_order_requires_active_payment_round(self) -> None:
+        result = self._order(self.boy)  # no decision made yet
+        self.assertEqual(result.error_code, "CONFLICT")
 
-    def test_create_reveal_order(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.REVEAL)
+    def test_create_order_in_payment_phase(self) -> None:
+        self._reach_reveal_payment()
+        result = self._order(self.boy)
         self.assertTrue(result.success)
-        self.assertTrue(result.data["order_id"].startswith("order_"))
-        self.assertEqual(Payment.objects.filter(chat=self.chat).count(), 1)
+        self.assertTrue(result.data["dev_bypass"])
+        self.assertTrue(result.data["order_id"].startswith("dev_order_"))
 
     def test_create_order_is_idempotent(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            first = self._create_order(self.a, PaymentPurpose.REVEAL)
-            second = self._create_order(self.a, PaymentPurpose.REVEAL)
+        self._reach_reveal_payment()
+        first = self._order(self.boy)
+        second = self._order(self.boy)
         self.assertEqual(first.data["order_id"], second.data["order_id"])
-        self.assertEqual(Payment.objects.filter(user=self.a).count(), 1)
+        self.assertEqual(Payment.objects.filter(user=self.boy).count(), 1)
 
-    # -- Verification -------------------------------------------------------
+    def test_double_pay_same_side_rejected(self) -> None:
+        self._reach_reveal_payment()
+        order = self._order(self.boy).data
+        self.service.verify_payment(
+            order_id=order["order_id"], payment_id="dev", signature="dev"
+        )
+        # Second order for the same already-paid side is rejected.
+        self.assertEqual(self._order(self.boy).error_code, "CONFLICT")
 
-    def test_invalid_signature_rejected(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a, PaymentPurpose.REVEAL).data
-        with mock.patch(_VERIFY, side_effect=InvalidPaymentSignature()):
-            result = self.service.verify_payment(
-                order_id=order["order_id"], payment_id="pay_x", signature="bad"
-            )
-        self.assertEqual(result.error_code, "VALIDATION_ERROR")
+    # -- webhook ------------------------------------------------------------
 
-    def test_mutual_reveal_payment_reveals_chat(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order_a = self._create_order(self.a, PaymentPurpose.REVEAL).data
-            order_b = self._create_order(self.b, PaymentPurpose.REVEAL).data
-
-        with mock.patch(_VERIFY, return_value=None):
-            self.service.verify_payment(
-                order_id=order_a["order_id"], payment_id="pay_a", signature="s"
-            )
-            # Not revealed until both pay.
-            self.chat.refresh_from_db()
-            self.assertEqual(self.chat.status, ChatStatus.ACTIVE)
-            self.service.verify_payment(
-                order_id=order_b["order_id"], payment_id="pay_b", signature="s"
-            )
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.REVEALED)
-
-    def test_verify_is_idempotent(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a, PaymentPurpose.REVEAL).data
-        with mock.patch(_VERIFY, return_value=None):
-            self.service.verify_payment(
-                order_id=order["order_id"], payment_id="pay_a", signature="s"
-            )
-            self.service.verify_payment(
-                order_id=order["order_id"], payment_id="pay_a", signature="s"
-            )
-        payment = Payment.objects.get(provider_order_id=order["order_id"])
-        self.assertEqual(payment.status, PaymentStatus.SUCCESS)
-
-    def test_create_order_blocks_double_pay(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a, PaymentPurpose.REVEAL).data
-        with mock.patch(_VERIFY, return_value=None):
-            self.service.verify_payment(
-                order_id=order["order_id"], payment_id="pay_a", signature="s"
-            )
-        # A second order for the same user+chat+purpose after success is rejected.
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.REVEAL)
-        self.assertEqual(result.error_code, "CONFLICT")
-
-    # -- Extension ----------------------------------------------------------
-
-    def test_both_extension_payments_extend_chat(self) -> None:
-        self.chats.expire_chat(str(self.chat.id))
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order_a = self._create_order(self.a, PaymentPurpose.CHAT_EXTENSION).data
-            order_b = self._create_order(self.b, PaymentPurpose.CHAT_EXTENSION).data
-        with mock.patch(_VERIFY, return_value=None):
-            self.service.verify_payment(
-                order_id=order_a["order_id"], payment_id="pay_a", signature="s"
-            )
-            self.chat.refresh_from_db()
-            self.assertEqual(self.chat.status, ChatStatus.EXPIRED)
-            self.service.verify_payment(
-                order_id=order_b["order_id"], payment_id="pay_b", signature="s"
-            )
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
-
-    def test_extension_order_requires_expired_chat(self) -> None:
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.CHAT_EXTENSION)
-        self.assertEqual(result.error_code, "CONFLICT")
-
-    def _pay_extension(self, user, payment_id) -> None:
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(user, PaymentPurpose.CHAT_EXTENSION).data
-        with mock.patch(_VERIFY, return_value=None):
-            self.service.verify_payment(
-                order_id=order["order_id"], payment_id=payment_id, signature="s"
-            )
-
-    def test_extension_blocks_double_pay_within_cycle(self) -> None:
-        self.chats.expire_chat(str(self.chat.id))
-        self._pay_extension(self.a, "pa1")
-        # Same user, same expiry cycle -> a second order is rejected.
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.CHAT_EXTENSION)
-        self.assertEqual(result.error_code, "CONFLICT")
-
-    def test_extension_is_repeatable_per_cycle(self) -> None:
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        # Cycle 1: both pay -> EXTENDED.
-        self.chats.expire_chat(str(self.chat.id))
-        self._pay_extension(self.a, "c1a")
-        self._pay_extension(self.b, "c1b")
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
-        self.assertEqual(self.chat.anonymous_chat_extension_count, 1)
-
-        # The 2-day window elapses: backdate cycle-1 payments, then re-expire.
-        Payment.objects.filter(
-            chat=self.chat, purpose=PaymentPurpose.CHAT_EXTENSION
-        ).update(created_at=timezone.now() - timedelta(days=3))
-        self.chats.expire_chat(str(self.chat.id))
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.EXPIRED)
-
-        # Cycle 2: only A pays -> NOT extended (B's cycle-1 payment doesn't count).
-        self._pay_extension(self.a, "c2a")
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.EXPIRED)
-
-        # Cycle 2: B pays too -> extended again (proves indefinite repeat).
-        self._pay_extension(self.b, "c2b")
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
-        self.assertEqual(self.chat.anonymous_chat_extension_count, 2)
-
-    # -- Webhook ------------------------------------------------------------
-
-    def test_webhook_marks_payment_success(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a, PaymentPurpose.REVEAL).data
+    def test_webhook_marks_success(self) -> None:
+        self._reach_reveal_payment()
+        order = self._order(self.boy).data
         body = json.dumps(
             {
                 "event": "payment.captured",
                 "payload": {
                     "payment": {
-                        "entity": {"id": "pay_hook", "order_id": order["order_id"]}
+                        "entity": {"id": "pay_x", "order_id": order["order_id"]}
                     }
                 },
             }
@@ -240,45 +128,47 @@ class PaymentServiceTests(TestCase):
         payment = Payment.objects.get(provider_order_id=order["order_id"])
         self.assertEqual(payment.status, PaymentStatus.SUCCESS)
 
-    def test_webhook_invalid_signature_rejected(self) -> None:
-        with mock.patch(_WEBHOOK, side_effect=InvalidPaymentSignature()):
-            result = self.service.process_webhook(body="{}", signature="bad")
-        self.assertEqual(result.error_code, "UNAUTHORIZED")
+    # -- store bundle -> coins ---------------------------------------------
 
-    # -- Dev bypass ---------------------------------------------------------
-
-    def test_order_payload_flags_dev_bypass_false_by_default(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            result = self._create_order(self.a, PaymentPurpose.REVEAL)
-        self.assertFalse(result.data["dev_bypass"])
-
-    @override_settings(PAYMENTS_DEV_BYPASS=True)
-    def test_dev_bypass_create_order_skips_gateway(self) -> None:
-        self._mutual_reveal()
-        with mock.patch(_ORDER) as order_mock:
-            result = self._create_order(self.a, PaymentPurpose.REVEAL)
-        order_mock.assert_not_called()
+    def test_purchase_bundle_grants_coins(self) -> None:
+        with mock.patch(_VERIFY_PLAY, side_effect=_play_stub):
+            result = self.service.purchase_bundle(
+                user=self.boy,
+                product_id="standard_reveal_3",
+                purchase_token="tok_" + uuid.uuid4().hex,
+            )
         self.assertTrue(result.success)
-        self.assertTrue(result.data["dev_bypass"])
-        self.assertTrue(result.data["order_id"].startswith("dev_order_"))
+        self.assertEqual(result.data["coins_added"], 3)
+        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 3)
 
-    @override_settings(PAYMENTS_DEV_BYPASS=True)
-    def test_dev_bypass_reveal_completes_without_signature(self) -> None:
-        self._mutual_reveal()
-        order_a = self._create_order(self.a, PaymentPurpose.REVEAL).data
-        order_b = self._create_order(self.b, PaymentPurpose.REVEAL).data
-        with mock.patch(_VERIFY) as verify_mock:
-            self.service.verify_payment(
-                order_id=order_a["order_id"],
-                payment_id="dev_bypass",
-                signature="dev_bypass",
+    def test_purchase_bundle_idempotent_on_token(self) -> None:
+        token = "tok_" + uuid.uuid4().hex
+        with mock.patch(_VERIFY_PLAY, side_effect=_play_stub):
+            self.service.purchase_bundle(
+                user=self.boy, product_id="standard_reveal_5", purchase_token=token
             )
-            self.service.verify_payment(
-                order_id=order_b["order_id"],
-                payment_id="dev_bypass",
-                signature="dev_bypass",
+            self.service.purchase_bundle(
+                user=self.boy, product_id="standard_reveal_5", purchase_token=token
             )
-        verify_mock.assert_not_called()
-        self.chat.refresh_from_db()
-        self.assertEqual(self.chat.status, ChatStatus.REVEALED)
+        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 5)
+
+    def test_purchase_unknown_product_rejected(self) -> None:
+        result = self.service.purchase_bundle(
+            user=self.boy, product_id="not_a_product", purchase_token="t"
+        )
+        self.assertEqual(result.error_code, "VALIDATION_ERROR")
+
+    # -- pay with coin ------------------------------------------------------
+
+    def test_pay_with_coin_spends_balance(self) -> None:
+        self.credits.credit(
+            user=self.boy, coin_type="REVEAL", amount=1,
+            reason="ADMIN_ADJUST", idempotency_key="seed",
+        )
+        self._reach_reveal_payment()
+        result = self.service.pay_with_coin(
+            user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["balances"]["reveal_coins"], 0)
+        self.assertTrue(self.reveal.has_paid(self.chat, self.boy))

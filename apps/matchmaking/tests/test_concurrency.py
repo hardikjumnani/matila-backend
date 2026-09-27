@@ -28,7 +28,7 @@ def _eligible(gender: str, prefs: list[str]) -> User:
         firebase_uid="fb_" + uuid.uuid4().hex,
         college_email=f"{uuid.uuid4().hex}@college.edu",
         gender=gender,
-        intent=Intent.FRIENDSHIP,
+        intent=Intent.RELATIONSHIP,
         gender_preferences=prefs,
         verification_status=VerificationStatus.APPROVED,
         onboarding_completed_at=timezone.now(),

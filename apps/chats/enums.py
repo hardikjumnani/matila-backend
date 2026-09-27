@@ -25,6 +25,8 @@ class ChatPhase(models.TextChoices):
 class EndReason(models.TextChoices):
     EXPIRED = "EXPIRED", "Expired"
     USER_EXIT = "USER_EXIT", "User exit"
+    AUTO_EXIT = "AUTO_EXIT", "Auto exit"
+    SAFE_REJECT = "SAFE_REJECT", "Safe reveal rejected"
     REPORT = "REPORT", "Report"
     REVEAL = "REVEAL", "Reveal"
     SYSTEM = "SYSTEM", "System"

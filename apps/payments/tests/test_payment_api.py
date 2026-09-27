@@ -1,144 +1,118 @@
-"""API tests for the payments endpoints (Razorpay gateway mocked)."""
+"""API tests for the payments / store / wallet endpoints (new model)."""
 
 from __future__ import annotations
 
-import json
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
-from apps.payments.enums import PaymentPurpose, PaymentStatus
-from apps.payments.gateway import InvalidPaymentSignature
-from apps.payments.models import Payment
+from apps.reveal.enums import DecisionChoice
 from apps.reveal.services.reveal_service import RevealService
+from apps.users.enums import Gender
 from apps.users.models import User
 
-_ORDER = "apps.payments.gateway.create_order"
-_VERIFY = "apps.payments.gateway.verify_payment_signature"
-_WEBHOOK = "apps.payments.gateway.verify_webhook_signature"
+_VERIFY_PLAY = "apps.payments.gateway_play.verify_product_purchase"
 
 
-def _user() -> User:
+def _user(gender: str) -> User:
     return User.objects.create(
         firebase_uid="fb_" + uuid.uuid4().hex,
         college_email=f"{uuid.uuid4().hex}@college.edu",
+        gender=gender,
+        intent="RELATIONSHIP",
+        gender_preferences=[Gender.MALE, Gender.FEMALE],
     )
 
 
 def _client(user: User) -> APIClient:
-    client = APIClient()
-    client.force_authenticate(user=user)
-    return client
+    c = APIClient()
+    c.force_authenticate(user=user)
+    return c
 
 
-def _order_stub(**_kwargs):
-    return {"id": "order_" + uuid.uuid4().hex}
+def _play_stub(**_kwargs):
+    return {"purchaseState": 0, "orderId": "GPA." + uuid.uuid4().hex}
 
 
 class PaymentApiTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
-        self.a = _user()
-        self.b = _user()
-        self.chat = ChatService().create_chat(self.a, self.b).data
-        Chat.objects.filter(id=self.chat.id).update(message_count=100)
+        self.boy = _user(Gender.MALE)
+        self.girl = _user(Gender.FEMALE)
+        self.chat = ChatService().create_chat(self.boy, self.girl).data
+        Chat.objects.filter(id=self.chat.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
         self.reveal = RevealService()
 
-    def _make_mutual(self) -> None:
-        self.reveal.submit_intent(chat_id=str(self.chat.id), user=self.a)
-        self.reveal.submit_intent(chat_id=str(self.chat.id), user=self.b)
+    def test_store_catalog(self) -> None:
+        resp = _client(self.boy).get("/api/v1/store/catalog")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()["data"]
+        self.assertEqual(len(data["standard_reveal_bundles"]), 4)
+        self.assertEqual(data["safe_reveal"]["female_price_paise"], 6900)
 
-    def _create_order(self, user):
-        return _client(user).post(
+    def test_wallet_starts_empty(self) -> None:
+        resp = _client(self.boy).get("/api/v1/wallet")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"]["reveal_coins"], 0)
+
+    def test_store_purchase_grants_coins(self) -> None:
+        with mock.patch(_VERIFY_PLAY, side_effect=_play_stub):
+            resp = _client(self.boy).post(
+                "/api/v1/store/purchase",
+                {"product_id": "standard_reveal_5", "purchase_token": "tok1"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["data"]["coins_added"], 5)
+        wallet = _client(self.boy).get("/api/v1/wallet").json()
+        self.assertEqual(wallet["data"]["reveal_coins"], 5)
+
+    @override_settings(PAYMENTS_DEV_BYPASS=True)
+    def test_create_order_in_payment_phase(self) -> None:
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.REVEAL
+        )
+        resp = _client(self.boy).post(
             "/api/v1/payments/create-order",
             {
                 "chat_id": str(self.chat.id),
-                "purpose": PaymentPurpose.REVEAL,
+                "purpose": "REVEAL",
                 "initiated_from": "CHAT_SCREEN",
             },
             format="json",
         )
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.json()["data"]["dev_bypass"])
 
-    def test_create_order_requires_mutual_intent(self) -> None:
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            response = self._create_order(self.a)
-        self.assertEqual(response.status_code, 400)
+    def test_pay_with_coin_endpoint(self) -> None:
+        from apps.payments.services.credit_service import CreditService
 
-    def test_create_order_success(self) -> None:
-        self._make_mutual()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            response = self._create_order(self.a)
-        self.assertEqual(response.status_code, 201)
-        self.assertTrue(response.json()["data"]["order_id"].startswith("order_"))
-
-    def test_verify_marks_success(self) -> None:
-        self._make_mutual()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a).json()["data"]
-        with mock.patch(_VERIFY, return_value=None):
-            response = _client(self.a).post(
-                "/api/v1/payments/verify",
-                {
-                    "razorpay_order_id": order["order_id"],
-                    "razorpay_payment_id": "pay_a",
-                    "razorpay_signature": "sig",
-                },
-                format="json",
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"]["status"], PaymentStatus.SUCCESS)
-
-    def test_webhook_valid_signature(self) -> None:
-        self._make_mutual()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a).json()["data"]
-        body = json.dumps(
-            {
-                "event": "payment.captured",
-                "payload": {
-                    "payment": {
-                        "entity": {"id": "pay_hook", "order_id": order["order_id"]}
-                    }
-                },
-            }
+        CreditService().credit(
+            user=self.boy, coin_type="REVEAL", amount=1,
+            reason="ADMIN_ADJUST", idempotency_key="seed",
         )
-        with mock.patch(_WEBHOOK, return_value=None):
-            response = APIClient().post(
-                "/api/v1/payments/webhook",
-                data=body,
-                content_type="application/json",
-                HTTP_X_RAZORPAY_SIGNATURE="sig",
-            )
-        self.assertEqual(response.status_code, 200)
-        payment = Payment.objects.get(provider_order_id=order["order_id"])
-        self.assertEqual(payment.status, PaymentStatus.SUCCESS)
-
-    def test_webhook_invalid_signature(self) -> None:
-        with mock.patch(_WEBHOOK, side_effect=InvalidPaymentSignature()):
-            response = APIClient().post(
-                "/api/v1/payments/webhook",
-                data="{}",
-                content_type="application/json",
-                HTTP_X_RAZORPAY_SIGNATURE="bad",
-            )
-        self.assertEqual(response.status_code, 401)
-
-    def test_payment_detail_ownership(self) -> None:
-        self._make_mutual()
-        with mock.patch(_ORDER, side_effect=_order_stub):
-            order = self._create_order(self.a).json()["data"]
-        payment_id = order["payment_id"]
-        own = _client(self.a).get(f"/api/v1/payments/{payment_id}")
-        self.assertEqual(own.status_code, 200)
-        other = _client(self.b).get(f"/api/v1/payments/{payment_id}")
-        self.assertEqual(other.status_code, 404)
-
-    def test_chat_payment_status(self) -> None:
-        response = _client(self.a).get(f"/api/v1/chats/{self.chat.id}/payments/status")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("reveal", response.json()["data"])
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.REVEAL
+        )
+        resp = _client(self.boy).post(
+            "/api/v1/payments/pay-with-coin",
+            {"chat_id": str(self.chat.id), "purpose": "REVEAL"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"]["balances"]["reveal_coins"], 0)

@@ -27,7 +27,22 @@ from apps.configuration.services.configuration_service import ConfigurationServi
 
 # key -> (value, description). Descriptions surface in the admin UI later.
 APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
-    AppConfigKey.REVEAL_PRICE_PAISE: (3900, "Reveal price in paise (Rs.39 per user)."),
+    AppConfigKey.REVEAL_PRICE_PAISE: (
+        3900,
+        "Standard reveal price in paise (Rs.39 per side / per coin).",
+    ),
+    AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE: (
+        6900,
+        "Safe reveal price for the girl in paise (Rs.69).",
+    ),
+    AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE: (
+        2900,
+        "Safe reveal price for the boy in paise (Rs.29).",
+    ),
+    AppConfigKey.STANDARD_REVEAL_BUNDLES: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.STANDARD_REVEAL_BUNDLES],
+        "Standard-reveal coin bundles sold in the store (with cut prices).",
+    ),
     AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: (
         2900,
         "2-day chat-extension price in paise (Rs.29 per user, repeatable).",

@@ -50,7 +50,7 @@ class Command(BaseCommand):
             college_email=f"demo.partner.{uuid.uuid4().hex[:8]}@dev.local",
             full_name=options["name"],
             gender=partner_gender,
-            intent=owner.intent or Intent.FRIENDSHIP,
+            intent=owner.intent or Intent.RELATIONSHIP,
             gender_preferences=[owner.gender] if owner.gender else list(_ALL_GENDERS),
             verification_status=VerificationStatus.APPROVED,
             verified_at=timezone.now(),

@@ -16,6 +16,9 @@ from typing import Any
 
 class AppConfigKey:
     REVEAL_PRICE_PAISE = "reveal_price_paise"
+    SAFE_REVEAL_FEMALE_PRICE_PAISE = "safe_reveal_female_price_paise"
+    SAFE_REVEAL_MALE_PRICE_PAISE = "safe_reveal_male_price_paise"
+    STANDARD_REVEAL_BUNDLES = "standard_reveal_bundles"
     CHAT_EXTENSION_PRICE_PAISE = "chat_extension_price_paise"
     RATING_QUESTIONNAIRE = "rating_questionnaire"
     FAQ_CONTENT = "faq_content"
@@ -37,8 +40,19 @@ class FeatureFlagKey:
 
 # Fallback values used when a key has not been seeded in the database.
 APP_CONFIG_DEFAULTS: dict[str, Any] = {
-    AppConfigKey.REVEAL_PRICE_PAISE: 3900,  # CHOSEN: reveal is Rs.39 per user.
+    AppConfigKey.REVEAL_PRICE_PAISE: 3900,  # CHOSEN: standard reveal, Rs.39/side.
+    AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE: 6900,  # CHOSEN: safe reveal, girl Rs.69.
+    AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE: 2900,  # CHOSEN: safe reveal, boy Rs.29.
     AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 2900,  # CHOSEN: 2-day extension, Rs.29/user.
+    # CHOSEN: standard-reveal-coin bundles sold in the store (paise). price_paise
+    # is what the user pays; original_price_paise drives the struck-through "cut"
+    # price. sku must match the Google Play managed-product id.
+    AppConfigKey.STANDARD_REVEAL_BUNDLES: [
+        {"sku": "standard_reveal_1", "coins": 1, "price_paise": 3900, "original_price_paise": 3900},
+        {"sku": "standard_reveal_3", "coins": 3, "price_paise": 9900, "original_price_paise": 12000},
+        {"sku": "standard_reveal_5", "coins": 5, "price_paise": 14900, "original_price_paise": 20000},
+        {"sku": "standard_reveal_10", "coins": 10, "price_paise": 29900, "original_price_paise": 40000},
+    ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
     # CHOSEN: gesture instructions the verification flow can request. gesture_type

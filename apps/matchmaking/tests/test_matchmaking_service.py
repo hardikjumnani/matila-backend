@@ -38,13 +38,13 @@ class MatchmakingServiceTests(TestCase):
         )
 
     def test_unverified_user_cannot_join(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         user.verification_status = VerificationStatus.PENDING
         user.save(update_fields=["verification_status"])
         self.assertEqual(self.service.join(user).error_code, "VERIFICATION_REQUIRED")
 
     def test_join_without_partner_queues(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         result = self.service.join(user)
         self.assertTrue(result.success)
         self.assertFalse(result.data.matched)
@@ -56,7 +56,7 @@ class MatchmakingServiceTests(TestCase):
         )
 
     def test_join_is_idempotent(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         self.service.join(user)
         self.service.join(user)
         self.assertEqual(
@@ -67,8 +67,8 @@ class MatchmakingServiceTests(TestCase):
         )
 
     def test_compatible_users_match(self) -> None:
-        a = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
-        b = _eligible(Gender.FEMALE, Intent.FRIENDSHIP, [Gender.MALE])
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
         self.service.join(a)
         result = self.service.join(b)
         self.assertTrue(result.data.matched)
@@ -81,14 +81,14 @@ class MatchmakingServiceTests(TestCase):
         self.assertEqual(self.notifications.create_notification.call_count, 2)
 
     def test_incompatible_gender_preference_does_not_match(self) -> None:
-        a = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.MALE])  # wants MALE
-        b = _eligible(Gender.FEMALE, Intent.FRIENDSHIP, [Gender.MALE])
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.MALE])  # wants MALE
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
         self.service.join(a)
         result = self.service.join(b)
         self.assertFalse(result.data.matched)
 
     def test_different_intent_does_not_match(self) -> None:
-        a = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         b = _eligible(Gender.FEMALE, Intent.CASUAL, [Gender.MALE])
         self.service.join(a)
         self.assertFalse(self.service.join(b).data.matched)
@@ -100,14 +100,14 @@ class MatchmakingServiceTests(TestCase):
         self.assertTrue(self.service.join(b).data.matched)
 
     def test_cannot_join_with_active_chat(self) -> None:
-        a = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
-        b = _eligible(Gender.FEMALE, Intent.FRIENDSHIP, [Gender.MALE])
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
         self.service.join(a)
         self.service.join(b)  # a and b now in a chat
         self.assertEqual(self.service.join(a).error_code, "CONFLICT")
 
     def test_leave_cancels_entry(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         self.service.join(user)
         self.service.leave(user)
         self.assertFalse(
@@ -117,17 +117,17 @@ class MatchmakingServiceTests(TestCase):
         )
 
     def test_status_transitions(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         self.assertEqual(self.service.get_status(user)["state"], "IDLE")
         self.service.join(user)
         self.assertEqual(self.service.get_status(user)["state"], "SEARCHING")
 
     def test_heartbeat_without_entry_fails(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         self.assertEqual(self.service.heartbeat(user).error_code, "RESOURCE_NOT_FOUND")
 
     def test_cleanup_stale_times_out_entries(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         self.service.join(user)
         MatchQueue.objects.filter(user=user).update(
             last_heartbeat_at=timezone.now() - timedelta(minutes=30)

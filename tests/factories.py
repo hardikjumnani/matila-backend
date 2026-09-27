@@ -31,7 +31,7 @@ class OnboardedUserFactory(UserFactory):
     """A user who has completed onboarding (profile fields set)."""
 
     gender = Gender.MALE
-    intent = Intent.FRIENDSHIP
+    intent = Intent.RELATIONSHIP
     gender_preferences = factory.LazyFunction(lambda: [Gender.FEMALE])
     onboarding_completed_at = factory.Faker("date_time_this_year", tzinfo=None)
 

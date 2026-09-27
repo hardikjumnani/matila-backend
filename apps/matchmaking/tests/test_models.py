@@ -23,9 +23,9 @@ def _user() -> User:
 class MatchQueueModelTests(TestCase):
     def test_only_one_active_entry_per_user(self) -> None:
         user = _user()
-        MatchQueue.objects.create(user=user, intent=Intent.FRIENDSHIP)
+        MatchQueue.objects.create(user=user, intent=Intent.RELATIONSHIP)
         with self.assertRaises(IntegrityError), transaction.atomic():
-            MatchQueue.objects.create(user=user, intent=Intent.FRIENDSHIP)
+            MatchQueue.objects.create(user=user, intent=Intent.RELATIONSHIP)
 
     def test_non_active_entries_do_not_block_a_new_search(self) -> None:
         """The partial unique index only constrains SEARCHING rows, so a user

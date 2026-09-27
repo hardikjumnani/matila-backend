@@ -52,13 +52,29 @@ class ChatSerializer(serializers.Serializer):
             return None
         participant = others[0]
         visible = obj.current_phase == ChatPhase.REVEALED
+        # Partial unmask: during an active Safe Reveal decision the boy is shown
+        # to the reviewing girl only (she is FEMALE, he is MALE, and the round is
+        # in SAFE_DECISION with the boy already revealed).
+        if not visible:
+            from apps.reveal.enums import DecisionRoundPhase
+            from apps.reveal.models import DecisionRound
+            from apps.users.enums import Gender
+
+            if me.gender == Gender.FEMALE and participant.user.gender == Gender.MALE:
+                visible = DecisionRound.objects.filter(
+                    chat_id=obj.id,
+                    phase=DecisionRoundPhase.SAFE_DECISION,
+                    boy_revealed_to_girl_at__isnull=False,
+                ).exists()
         # A stable anonymous alias so the client always has a label; the real
-        # name is exposed only once identity is visible. The read pointer is
-        # exposed regardless of phase (it is a message id, not identity) so the
-        # client can render persistent read receipts across refetch/restart.
+        # name is exposed only once identity is visible. Gender is always exposed
+        # (it drives the blue/pink anonymous avatar and is not identity). The read
+        # pointer is exposed regardless of phase (it is a message id, not
+        # identity) so read receipts persist across refetch/restart.
         return {
             "user_id": str(participant.user_id),
             "alias": anonymous_alias(str(obj.id), str(participant.user_id)),
+            "gender": participant.user.gender,
             "display_name": participant.user.full_name if visible else None,
             "profile_photo_url": (
                 resolve_media_url(participant.user.profile_photo_url)

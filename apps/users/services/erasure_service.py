@@ -23,7 +23,7 @@ from apps.matchmaking.models import MatchQueue
 from apps.messaging.models import Message
 from apps.notifications.models import DeviceToken, Notification
 from apps.ratings.models import Rating
-from apps.reveal.models import RevealIntent
+from apps.reveal.models import ParticipantDecision
 from apps.users.enums import AccountStatus
 from apps.users.models import User
 from apps.verification.models import VerificationRequest
@@ -90,7 +90,9 @@ class UserErasureService:
                 ).delete()[0],
                 "device_tokens": DeviceToken.objects.filter(user=user).delete()[0],
                 "notifications": Notification.objects.filter(user=user).delete()[0],
-                "reveal_intents": RevealIntent.objects.filter(user=user).delete()[0],
+                "reveal_decisions": ParticipantDecision.objects.filter(
+                    user=user
+                ).delete()[0],
                 "match_queue_entries": MatchQueue.objects.filter(user=user).delete()[0],
                 "chat_participations": ChatParticipant.objects.filter(
                     user=user

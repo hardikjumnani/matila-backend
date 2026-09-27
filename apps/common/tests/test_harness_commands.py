@@ -25,7 +25,7 @@ def _owner() -> User:
         college_email="owner@college.edu",
         full_name="Owner",
         gender=Gender.MALE,
-        intent=Intent.FRIENDSHIP,
+        intent=Intent.RELATIONSHIP,
         gender_preferences=[Gender.FEMALE],
         onboarding_completed_at=timezone.now(),
         verification_status=VerificationStatus.APPROVED,

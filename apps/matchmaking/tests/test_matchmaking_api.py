@@ -32,7 +32,7 @@ def _client_for(user: User) -> APIClient:
 
 class MatchmakingApiTests(TestCase):
     def test_unverified_user_forbidden(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         user.verification_status = VerificationStatus.PENDING
         user.save(update_fields=["verification_status"])
         response = _client_for(user).post("/api/v1/matchmaking/join")
@@ -40,7 +40,7 @@ class MatchmakingApiTests(TestCase):
         self.assertEqual(response.json()["error"]["code"], "VERIFICATION_REQUIRED")
 
     def test_join_without_partner(self) -> None:
-        user = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         response = _client_for(user).post("/api/v1/matchmaking/join")
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
@@ -48,8 +48,8 @@ class MatchmakingApiTests(TestCase):
         self.assertIsNotNone(data["queue_entry_id"])
 
     def test_two_compatible_users_match(self) -> None:
-        a = _eligible(Gender.MALE, Intent.FRIENDSHIP, [Gender.FEMALE])
-        b = _eligible(Gender.FEMALE, Intent.FRIENDSHIP, [Gender.MALE])
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
         _client_for(a).post("/api/v1/matchmaking/join")
         response = _client_for(b).post("/api/v1/matchmaking/join")
         data = response.json()["data"]

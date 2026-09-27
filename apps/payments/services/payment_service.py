@@ -1,11 +1,11 @@
 """
 Payment service.
 
-Owns ``payments`` (an append-only ledger). Creates Razorpay orders, verifies
-client-reported payments and webhooks, and triggers the downstream effects:
-completing a reveal (both users paid) or extending an anonymous chat (both users
-paid). Verification and webhook handling are idempotent, so the client-verify
-and webhook paths can both fire for the same payment without double effects.
+Owns ``payments`` (an append-only ledger) and orchestrates money/coin flows for
+the decision phase. Chat-bound payments (REVEAL / SAFE_REVEAL / CHAT_EXTENSION)
+mark the payer's side on the active DecisionRound via RevealService; store bundle
+purchases (CREDIT_PURCHASE) grant reveal_coins via CreditService. Verify/webhook
+paths are idempotent. See docs/REVEAL_FLOW_SPEC.md.
 """
 
 from __future__ import annotations
@@ -15,12 +15,18 @@ import logging
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
-from apps.chats.enums import ChatStatus
 from apps.common.results import ServiceResult
 from apps.configuration.constants import FeatureFlagKey
 from apps.payments import gateway
+from apps.payments.constants import (
+    PLAY_PRODUCT_TO_PURPOSE,
+    SAFE_REVEAL_SKU_BY_GENDER,
+)
 from apps.payments.enums import (
+    CoinLedgerReason,
+    CoinType,
     PaymentInitiatedFrom,
     PaymentProvider,
     PaymentPurpose,
@@ -35,9 +41,21 @@ _CURRENCY = "INR"
 _SUCCESS_EVENTS = ("payment.captured", "payment.authorized")
 _FAILURE_EVENTS = ("payment.failed",)
 
+# Chat-bound payable purposes and the FinalCall each corresponds to.
+_CHAT_BOUND = (
+    PaymentPurpose.REVEAL,
+    PaymentPurpose.SAFE_REVEAL,
+    PaymentPurpose.CHAT_EXTENSION,
+)
+_PURPOSE_TO_FINAL = {
+    PaymentPurpose.REVEAL: "REVEAL",
+    PaymentPurpose.SAFE_REVEAL: "SAFE_REVEAL",
+    PaymentPurpose.CHAT_EXTENSION: "EXTEND",
+}
+
 
 class PaymentService:
-    """Razorpay order lifecycle and payment-driven side effects."""
+    """Order lifecycle, coin flows, and decision-round progression."""
 
     def __init__(
         self,
@@ -45,6 +63,7 @@ class PaymentService:
         configuration_service=None,
         chat_service=None,
         reveal_service=None,
+        credit_service=None,
         notification_service=None,
     ) -> None:
         if configuration_service is None:
@@ -61,6 +80,10 @@ class PaymentService:
             from apps.reveal.services.reveal_service import RevealService
 
             reveal_service = RevealService()
+        if credit_service is None:
+            from apps.payments.services.credit_service import CreditService
+
+            credit_service = CreditService()
         if notification_service is None:
             from apps.notifications.services.notification_service import (
                 NotificationService,
@@ -70,9 +93,39 @@ class PaymentService:
         self._config = configuration_service
         self._chats = chat_service
         self._reveal = reveal_service
+        self._credits = credit_service
         self._notifications = notification_service
 
-    # -- Order creation -----------------------------------------------------
+    # -- Amount / context ---------------------------------------------------
+
+    def _resolve_amount(self, chat, purpose, user) -> ServiceResult[int]:
+        if purpose == PaymentPurpose.REVEAL:
+            return ServiceResult.ok(self._config.get_reveal_price_paise())
+        if purpose == PaymentPurpose.SAFE_REVEAL:
+            from apps.users.enums import Gender
+
+            if user.gender == Gender.FEMALE:
+                return ServiceResult.ok(
+                    self._config.get_safe_reveal_female_price_paise()
+                )
+            return ServiceResult.ok(self._config.get_safe_reveal_male_price_paise())
+        if purpose == PaymentPurpose.CHAT_EXTENSION:
+            return ServiceResult.ok(self._config.get_chat_extension_price_paise())
+        return ServiceResult.fail("VALIDATION_ERROR", "Unknown payment purpose.")
+
+    def _validate_payable_context(self, chat, user, purpose) -> ServiceResult[None]:
+        """Ensure an active PAYMENT round matches this purpose and the user has
+        not already paid this cycle."""
+        expected = _PURPOSE_TO_FINAL.get(purpose)
+        if self._reveal.get_active_final_call(chat) != expected:
+            return ServiceResult.fail(
+                "CONFLICT", "No active payment is expected for this action."
+            )
+        if self._reveal.has_paid(chat, user):
+            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+        return ServiceResult.ok(None)
+
+    # -- Razorpay / dev-bypass order (chat-bound) ---------------------------
 
     def create_order(
         self,
@@ -82,31 +135,29 @@ class PaymentService:
         purpose: PaymentPurpose | str,
         initiated_from: PaymentInitiatedFrom | str,
     ) -> ServiceResult[dict]:
-        """Create (or reuse a pending) Razorpay order for reveal/extension."""
         if not self._config.is_feature_enabled(FeatureFlagKey.PAYMENTS_ENABLED):
             return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
-
+        if purpose not in _CHAT_BOUND:
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "This purpose is not orderable here."
+            )
         chat = self._chats.get_chat(chat_id)
         if chat is None:
             return ServiceResult.fail("RESOURCE_NOT_FOUND", "Chat not found.")
         if not self._chats.is_participant(chat, user):
             return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
 
-        # Prevent a double charge within the current window. Reveal is one-time
-        # (ever); a 2-day extension is one-time PER expiry cycle, so it can be
-        # bought again after the chat expires anew.
-        if self._already_paid(user, chat, purpose):
-            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+        ctx = self._validate_payable_context(chat, user, purpose)
+        if ctx.failed:
+            return ServiceResult.fail(ctx.error_code, ctx.error_message)
 
-        amount_result = self._resolve_amount(chat, purpose)
+        amount_result = self._resolve_amount(chat, purpose, user)
         if amount_result.failed:
             return ServiceResult.fail(
                 amount_result.error_code, amount_result.error_message
             )
         amount = amount_result.data
 
-        # Idempotent reuse: an existing pending order for this (user, chat,
-        # purpose) is returned rather than creating a duplicate.
         existing = Payment.objects.filter(
             user=user,
             chat=chat,
@@ -127,9 +178,6 @@ class PaymentService:
             status=PaymentStatus.PENDING,
         )
 
-        # Dev bypass: skip the real gateway and hand back a synthetic order id.
-        # The client sees ``dev_bypass: true`` (via _order_payload) and proceeds
-        # straight to verify.
         if settings.PAYMENTS_DEV_BYPASS:
             payment.provider_order_id = f"dev_order_{payment.id}"
             payment.save(update_fields=["provider_order_id"])
@@ -154,42 +202,6 @@ class PaymentService:
         payment.save(update_fields=["provider_order_id"])
         return ServiceResult.ok(self._order_payload(payment))
 
-    def _already_paid(self, user, chat, purpose) -> bool:
-        """Whether a new order for (user, chat, purpose) must be rejected.
-
-        Reveal is one-time ever. A 2-day extension is one-time **per expiry
-        cycle**: extensions are only bought while the chat is EXPIRED, so a
-        SUCCESS extension payment counts only if it was made since the chat's
-        current EXPIRED transition (``status_changed_at``). Once the chat expires
-        again, a fresh extension can be purchased — enabling indefinite cycles.
-        """
-        qs = Payment.objects.filter(
-            user=user, chat=chat, purpose=purpose, status=PaymentStatus.SUCCESS
-        )
-        if purpose == PaymentPurpose.CHAT_EXTENSION:
-            qs = qs.filter(created_at__gte=chat.status_changed_at)
-        return qs.exists()
-
-    def _resolve_amount(
-        self, chat, purpose: PaymentPurpose | str
-    ) -> ServiceResult[int]:
-        if purpose == PaymentPurpose.REVEAL:
-            if chat.status == ChatStatus.REVEALED:
-                return ServiceResult.fail("CONFLICT", "This chat is already revealed.")
-            if not self._reveal.is_mutual(str(chat.id)):
-                return ServiceResult.fail(
-                    "VALIDATION_ERROR",
-                    "Reveal payment requires mutual reveal intent.",
-                )
-            return ServiceResult.ok(self._config.get_reveal_price_paise())
-        if purpose == PaymentPurpose.CHAT_EXTENSION:
-            if chat.status != ChatStatus.EXPIRED:
-                return ServiceResult.fail(
-                    "CONFLICT", "Chat extension is only available after expiry."
-                )
-            return ServiceResult.ok(self._config.get_chat_extension_price_paise())
-        return ServiceResult.fail("VALIDATION_ERROR", "Unknown payment purpose.")
-
     def _order_payload(self, payment: Payment) -> dict:
         return {
             "payment_id": str(payment.id),
@@ -198,19 +210,14 @@ class PaymentService:
             "currency": payment.currency,
             "razorpay_key_id": settings.RAZORPAY_KEY_ID,
             "purpose": payment.purpose,
-            # Signals the client to skip the Razorpay SDK and go straight to
-            # verify. Always False in production (gateway is real there).
             "dev_bypass": settings.PAYMENTS_DEV_BYPASS,
         }
 
-    # -- Verification -------------------------------------------------------
+    # -- Verification (Razorpay / dev-bypass) -------------------------------
 
     def verify_payment(
         self, *, order_id: str, payment_id: str, signature: str
     ) -> ServiceResult[Payment]:
-        """Verify a client-reported payment signature and apply its effects."""
-        # Dev bypass: accept the client-reported payment without contacting the
-        # gateway (order/payment ids and signature may be placeholders).
         if not settings.PAYMENTS_DEV_BYPASS:
             try:
                 gateway.verify_payment_signature(
@@ -221,9 +228,6 @@ class PaymentService:
                     "VALIDATION_ERROR", "Payment signature verification failed."
                 )
         else:
-            # The client sends the same placeholder for every bypassed payment,
-            # which would collide on the unique provider_payment_id column;
-            # derive a unique id from the (unique) order id instead.
             payment_id = f"dev_pay_{order_id}"
 
         payment, already_done = self._apply_success(
@@ -236,7 +240,6 @@ class PaymentService:
         return ServiceResult.ok(payment)
 
     def process_webhook(self, *, body: str, signature: str) -> ServiceResult[dict]:
-        """Process a Razorpay webhook idempotently."""
         try:
             gateway.verify_webhook_signature(body=body, signature=signature)
         except gateway.InvalidPaymentSignature:
@@ -245,7 +248,6 @@ class PaymentService:
             return ServiceResult.fail(
                 "INTERNAL_SERVER_ERROR", "Webhook processing is not configured."
             )
-
         try:
             payload = json.loads(body)
             event = payload.get("event", "")
@@ -263,12 +265,9 @@ class PaymentService:
                 self._handle_successful_payment(payment)
         elif event in _FAILURE_EVENTS:
             self._apply_failure(order_id=order_id)
-
-        # Always acknowledge: unrecognized/unknown events must not trigger
-        # Razorpay retries.
         return ServiceResult.ok({"event": event})
 
-    # -- Google Play Billing -----------------------------------------------
+    # -- Google Play (chat-bound) -------------------------------------------
 
     def verify_google_play_purchase(
         self,
@@ -280,40 +279,38 @@ class PaymentService:
         purchase_token: str,
         initiated_from: PaymentInitiatedFrom | str,
     ) -> ServiceResult[Payment]:
-        """Verify a Google Play purchase token and apply its effects.
-
-        Play has no server-created order: the client buys via the Play SDK and
-        reports the purchase token, which we verify against the Play Developer
-        API. Idempotent on the (unique) purchase token, so a retry never
-        double-grants. Reuses the same reveal/extension completion as Razorpay.
-        """
         from apps.payments import gateway_play
-        from apps.payments.constants import PLAY_PRODUCT_TO_PURPOSE
 
         if not self._config.is_feature_enabled(FeatureFlagKey.PAYMENTS_ENABLED):
             return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
+        if purpose not in _CHAT_BOUND:
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "Use the store endpoint for bundle purchases."
+            )
         if PLAY_PRODUCT_TO_PURPOSE.get(product_id) != purpose:
             return ServiceResult.fail(
                 "VALIDATION_ERROR", "Product does not match the requested purpose."
             )
-
         chat = self._chats.get_chat(chat_id)
         if chat is None:
             return ServiceResult.fail("RESOURCE_NOT_FOUND", "Chat not found.")
         if not self._chats.is_participant(chat, user):
             return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
+        if purpose == PaymentPurpose.SAFE_REVEAL:
+            if product_id != SAFE_REVEAL_SKU_BY_GENDER.get(str(user.gender)):
+                return ServiceResult.fail(
+                    "VALIDATION_ERROR", "Wrong safe-reveal product for your role."
+                )
 
-        # Idempotency: this exact purchase token was already recorded.
         existing = Payment.objects.filter(provider_payment_id=purchase_token).first()
         if existing is not None:
             return ServiceResult.ok(existing)
 
-        # Reveal is one-time; a 2-day extension is one-time per expiry cycle.
-        if self._already_paid(user, chat, purpose):
-            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+        ctx = self._validate_payable_context(chat, user, purpose)
+        if ctx.failed:
+            return ServiceResult.fail(ctx.error_code, ctx.error_message)
 
-        # Eligibility + amount (REVEAL needs mutual intent; EXTENSION needs EXPIRED).
-        amount_result = self._resolve_amount(chat, purpose)
+        amount_result = self._resolve_amount(chat, purpose, user)
         if amount_result.failed:
             return ServiceResult.fail(
                 amount_result.error_code, amount_result.error_message
@@ -324,9 +321,7 @@ class PaymentService:
                 product_id=product_id, purchase_token=purchase_token
             )
         except gateway_play.InvalidPurchase:
-            return ServiceResult.fail(
-                "VALIDATION_ERROR", "Purchase verification failed."
-            )
+            return ServiceResult.fail("VALIDATION_ERROR", "Purchase verification failed.")
         except gateway_play.PlayGatewayError:
             return ServiceResult.fail(
                 "INTERNAL_SERVER_ERROR", "Could not verify the purchase."
@@ -346,6 +341,124 @@ class PaymentService:
             self._handle_successful_payment(payment)
         return ServiceResult.ok(payment)
 
+    # -- Store bundle purchase (grants reveal_coins) ------------------------
+
+    def purchase_bundle(
+        self,
+        *,
+        user: User,
+        product_id: str,
+        purchase_token: str,
+    ) -> ServiceResult[dict]:
+        from apps.payments import gateway_play
+
+        if not self._config.is_feature_enabled(FeatureFlagKey.PAYMENTS_ENABLED):
+            return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
+        if PLAY_PRODUCT_TO_PURPOSE.get(product_id) != PaymentPurpose.CREDIT_PURCHASE:
+            return ServiceResult.fail("VALIDATION_ERROR", "Unknown store product.")
+        bundle = self._config.get_bundle_by_sku(product_id)
+        if bundle is None:
+            return ServiceResult.fail("VALIDATION_ERROR", "Unknown store product.")
+
+        existing = Payment.objects.filter(provider_payment_id=purchase_token).first()
+        if existing is not None:
+            return ServiceResult.ok(
+                {
+                    "payment_id": str(existing.id),
+                    "coins_added": int(existing.metadata.get("coins", 0)),
+                    "balances": self._credits.get_balances(user),
+                }
+            )
+
+        try:
+            info = gateway_play.verify_product_purchase(
+                product_id=product_id, purchase_token=purchase_token
+            )
+        except gateway_play.InvalidPurchase:
+            return ServiceResult.fail("VALIDATION_ERROR", "Purchase verification failed.")
+        except gateway_play.PlayGatewayError:
+            return ServiceResult.fail(
+                "INTERNAL_SERVER_ERROR", "Could not verify the purchase."
+            )
+
+        coins = int(bundle["coins"])
+        try:
+            payment = Payment.objects.create(
+                user=user,
+                chat=None,
+                purpose=PaymentPurpose.CREDIT_PURCHASE,
+                amount_in_paise=int(bundle["price_paise"]),
+                currency=_CURRENCY,
+                provider=PaymentProvider.GOOGLE_PLAY,
+                provider_order_id=info.get("orderId") or None,
+                provider_payment_id=purchase_token,
+                status=PaymentStatus.SUCCESS,
+                initiated_from=PaymentInitiatedFrom.STORE,
+                metadata={"product_id": product_id, "coins": coins},
+            )
+        except IntegrityError:
+            payment = Payment.objects.get(provider_payment_id=purchase_token)
+        self._credits.credit(
+            user=user,
+            coin_type=CoinType.REVEAL,
+            amount=coins,
+            reason=CoinLedgerReason.BUNDLE_PURCHASE,
+            idempotency_key=f"bundle:{purchase_token}",
+            payment=payment,
+        )
+        return ServiceResult.ok(
+            {
+                "payment_id": str(payment.id),
+                "coins_added": coins,
+                "balances": self._credits.get_balances(user),
+            }
+        )
+
+    # -- Pay with coin (chat-bound reveal / safe reveal) --------------------
+
+    def pay_with_coin(
+        self, *, user: User, chat_id: str, purpose: PaymentPurpose | str
+    ) -> ServiceResult[dict]:
+        from apps.users.enums import Gender
+
+        if purpose not in (PaymentPurpose.REVEAL, PaymentPurpose.SAFE_REVEAL):
+            return ServiceResult.fail(
+                "VALIDATION_ERROR", "Only reveals can be paid with coins."
+            )
+        chat = self._chats.get_chat(chat_id)
+        if chat is None:
+            return ServiceResult.fail("RESOURCE_NOT_FOUND", "Chat not found.")
+        if not self._chats.is_participant(chat, user):
+            return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
+
+        ctx = self._validate_payable_context(chat, user, purpose)
+        if ctx.failed:
+            return ServiceResult.fail(ctx.error_code, ctx.error_message)
+
+        if purpose == PaymentPurpose.SAFE_REVEAL and user.gender == Gender.FEMALE:
+            coin_type = CoinType.SAFE_REVEAL
+        else:
+            coin_type = CoinType.REVEAL
+
+        round_id = self._reveal.active_round_id(chat)
+        consumed = self._credits.consume(
+            user=user,
+            coin_type=coin_type,
+            idempotency_key=f"consume:{round_id}:{user.id}:{coin_type}",
+            chat=chat,
+        )
+        if consumed.failed:
+            return ServiceResult.fail(consumed.error_code, consumed.error_message)
+
+        self._reveal.record_payment(
+            chat_id=str(chat.id), user=user, purpose=purpose, paid_with_coin=True
+        )
+        return ServiceResult.ok(
+            {"paid_with_coin": True, "balances": self._credits.get_balances(user)}
+        )
+
+    # -- Ledger internals ---------------------------------------------------
+
     def _record_play_success(
         self,
         *,
@@ -358,8 +471,6 @@ class PaymentService:
         purchase_token,
         order_id,
     ) -> tuple[Payment, bool]:
-        """Create a SUCCESS payment for a verified Play purchase, idempotent on
-        the unique purchase token. Returns (payment, created)."""
         try:
             payment = Payment.objects.create(
                 user=user,
@@ -376,14 +487,12 @@ class PaymentService:
             )
             return payment, True
         except IntegrityError:
-            # Concurrent verify of the same token lost the race; return the winner.
             return Payment.objects.get(provider_payment_id=purchase_token), False
 
     @transaction.atomic
     def _apply_success(
         self, *, order_id: str, payment_id: str, signature: str
     ) -> tuple[Payment | None, bool]:
-        """Mark a payment SUCCESS. Returns (payment, already_processed)."""
         payment = (
             Payment.objects.select_for_update()
             .filter(provider_order_id=order_id)
@@ -393,11 +502,11 @@ class PaymentService:
             return None, False
         if payment.status == PaymentStatus.SUCCESS:
             return payment, True
-
         payment.status = PaymentStatus.SUCCESS
         payment.provider_payment_id = payment_id or payment.provider_payment_id
         if signature:
             payment.provider_signature = signature
+        payment.status_changed_at = timezone.now()
         payment.save(
             update_fields=[
                 "status",
@@ -417,47 +526,17 @@ class PaymentService:
         )
         if payment is not None and payment.status == PaymentStatus.PENDING:
             payment.status = PaymentStatus.FAILED
+            payment.status_changed_at = timezone.now()
             payment.save(update_fields=["status", "status_changed_at"])
 
-    # -- Side effects -------------------------------------------------------
-
     def _handle_successful_payment(self, payment: Payment) -> None:
-        if payment.purpose == PaymentPurpose.REVEAL:
-            self._reveal.mark_intent_paid(
-                chat_id=str(payment.chat_id), user=payment.user
+        if payment.purpose in _CHAT_BOUND and payment.chat_id is not None:
+            self._reveal.record_payment(
+                chat_id=str(payment.chat_id),
+                user=payment.user,
+                purpose=payment.purpose,
+                paid_with_coin=False,
             )
-        elif payment.purpose == PaymentPurpose.CHAT_EXTENSION:
-            self._maybe_extend_chat(str(payment.chat_id))
-
-    def _maybe_extend_chat(self, chat_id: str) -> None:
-        """Extend the chat once both participants have paid for the CURRENT cycle.
-
-        Only extends from EXPIRED (idempotency: a second success — e.g. webhook
-        after verify — cannot extend twice). Counts only extension payments made
-        since this EXPIRED transition, so each 2-day cycle needs its own two
-        payments and prior cycles never pre-satisfy a later one.
-        """
-        chat = self._chats.get_chat(chat_id)
-        if chat is None or chat.status != ChatStatus.EXPIRED:
-            return
-
-        paid_users = (
-            Payment.objects.filter(
-                chat_id=chat_id,
-                purpose=PaymentPurpose.CHAT_EXTENSION,
-                status=PaymentStatus.SUCCESS,
-                created_at__gte=chat.status_changed_at,
-            )
-            .values("user")
-            .distinct()
-            .count()
-        )
-        if paid_users < 2:
-            return
-
-        result = self._chats.extend_chat(chat_id)
-        if result.success:
-            self._notify_extended(chat_id)
 
     # -- Reads --------------------------------------------------------------
 
@@ -465,31 +544,7 @@ class PaymentService:
         return Payment.objects.filter(id=payment_id, user=user).first()
 
     def get_chat_payment_status(self, *, chat_id: str, user: User) -> dict:
-        def _stats(purpose: str) -> dict:
-            qs = Payment.objects.filter(
-                chat_id=chat_id, purpose=purpose, status=PaymentStatus.SUCCESS
-            )
-            return {
-                "paid_count": qs.values("user").distinct().count(),
-                "paid_by_me": qs.filter(user=user).exists(),
-            }
-
-        return {
-            "reveal": _stats(PaymentPurpose.REVEAL),
-            "extension": _stats(PaymentPurpose.CHAT_EXTENSION),
-        }
-
-    def _notify_extended(self, chat_id: str) -> None:
-        from apps.chats.models import ChatParticipant
-
-        for participant in ChatParticipant.objects.select_related("user").filter(
-            chat_id=chat_id
-        ):
-            self._notifications.create_notification(
-                user=participant.user,
-                type="chat.extended",
-                title="Your chat has been extended",
-                body="You can keep chatting anonymously.",
-                action_type="OPEN_CHAT",
-                action_payload={"chat_id": str(chat_id)},
-            )
+        state = self._reveal.get_decision_state(chat_id=chat_id, user=user)
+        data = state.data if state.success else {}
+        data["balances"] = self._credits.get_balances(user)
+        return data

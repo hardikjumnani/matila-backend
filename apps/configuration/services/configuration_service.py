@@ -92,6 +92,21 @@ class ConfigurationService:
     def get_chat_extension_price_paise(self) -> int:
         return int(self.get_config(AppConfigKey.CHAT_EXTENSION_PRICE_PAISE))
 
+    def get_safe_reveal_female_price_paise(self) -> int:
+        return int(self.get_config(AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE))
+
+    def get_safe_reveal_male_price_paise(self) -> int:
+        return int(self.get_config(AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE))
+
+    def get_standard_reveal_bundles(self) -> list[dict]:
+        return list(self.get_config(AppConfigKey.STANDARD_REVEAL_BUNDLES) or [])
+
+    def get_bundle_by_sku(self, sku: str) -> dict | None:
+        for bundle in self.get_standard_reveal_bundles():
+            if bundle.get("sku") == sku:
+                return bundle
+        return None
+
     def get_matchmaking_timeout_seconds(self) -> int:
         return int(self.get_config(AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS))
 
@@ -127,6 +142,10 @@ class ConfigurationService:
             "pricing": {
                 "reveal_price_paise": self.get_reveal_price_paise(),
                 "chat_extension_price_paise": self.get_chat_extension_price_paise(),
+                "safe_reveal_female_price_paise": (
+                    self.get_safe_reveal_female_price_paise()
+                ),
+                "safe_reveal_male_price_paise": self.get_safe_reveal_male_price_paise(),
             },
             "rating_questionnaire": self.get_rating_questionnaire(),
             "faq": self.get_config(AppConfigKey.FAQ_CONTENT),

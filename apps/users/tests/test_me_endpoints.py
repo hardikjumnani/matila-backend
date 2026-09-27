@@ -78,7 +78,7 @@ class MeEndpointTests(TestCase):
     def test_complete_onboarding_success(self) -> None:
         self.user.full_name = "Alice"
         self.user.gender = Gender.FEMALE
-        self.user.intent = Intent.FRIENDSHIP
+        self.user.intent = Intent.RELATIONSHIP
         self.user.gender_preferences = [Gender.MALE]
         self.user.save()
         response = self.client.post(_ME + "/complete-onboarding")

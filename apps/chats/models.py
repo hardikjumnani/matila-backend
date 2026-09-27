@@ -35,15 +35,18 @@ class Chat(UUIDModel):
         default=ChatPhase.ANONYMOUS,
     )
     end_reason = models.CharField(
-        max_length=10, choices=EndReason.choices, blank=True, default=""
+        max_length=15, choices=EndReason.choices, blank=True, default=""
     )
 
     # Timestamp of the most recent status transition; updated by ChatService on
     # every transition (not auto_now, which would fire on any save).
     status_changed_at = models.DateTimeField(default=timezone.now)
-    # When the current phase ends (e.g. the 72h anonymous window). Drives the
+    # When the current phase ends (e.g. the 48h anonymous window). Drives the
     # chat-expiry background task.
     current_phase_ends_at = models.DateTimeField(null=True, blank=True)
+    # After expiry, the deadline by which a decision must complete before the
+    # chat auto-exits (expiry + 24h grace). Set on expiry, cleared on extend.
+    decision_deadline_at = models.DateTimeField(null=True, blank=True)
 
     message_count = models.PositiveIntegerField(default=0)
     anonymous_chat_extension_count = models.PositiveIntegerField(default=0)

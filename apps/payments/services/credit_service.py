@@ -101,7 +101,7 @@ class CreditService:
 
         field = _FIELD_BY_COIN[coin_type]
         if getattr(wallet, field) < 1:
-            return ServiceResult.fail("CONFLICT", "Insufficient coins.")
+            return ServiceResult.fail("INSUFFICIENT_COINS", "Insufficient coins.")
         new_balance = getattr(wallet, field) - 1
         setattr(wallet, field, new_balance)
         wallet.save(update_fields=[field, "updated_at"])

@@ -113,10 +113,10 @@ class PaymentService:
         expected = _PURPOSE_TO_FINAL.get(purpose)
         if self._reveal.get_active_final_call(chat) != expected:
             return ServiceResult.fail(
-                "CONFLICT", "No active payment is expected for this action."
+                "NO_ACTIVE_PAYMENT", "No active payment is expected for this action."
             )
         if self._reveal.has_paid(chat, user):
-            return ServiceResult.fail("CONFLICT", "You have already paid for this.")
+            return ServiceResult.fail("ALREADY_PAID", "You have already paid for this.")
         return ServiceResult.ok(None)
 
     # -- Google Play (chat-bound: SAFE_REVEAL / CHAT_EXTENSION) --------------

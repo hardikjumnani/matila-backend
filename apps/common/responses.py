@@ -33,6 +33,11 @@ ERROR_STATUS_MAP: dict[str, int] = {
     "VALIDATION_ERROR": http.HTTP_400_BAD_REQUEST,
     "CONFLICT": http.HTTP_409_CONFLICT,
     "CHAT_READ_ONLY": http.HTTP_409_CONFLICT,
+    # Payment/coin 409 variants — let the client route without a re-GET:
+    # insufficient coins -> open store; already paid -> waiting; no active round -> refresh.
+    "INSUFFICIENT_COINS": http.HTTP_409_CONFLICT,
+    "ALREADY_PAID": http.HTTP_409_CONFLICT,
+    "NO_ACTIVE_PAYMENT": http.HTTP_409_CONFLICT,
     "MESSAGE_TOO_LONG": http.HTTP_400_BAD_REQUEST,
     "INVALID_REPLY_TARGET": http.HTTP_400_BAD_REQUEST,
     "MEDIA_NOT_AVAILABLE": http.HTTP_410_GONE,

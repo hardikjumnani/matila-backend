@@ -366,4 +366,4 @@ class DecisionFlowTests(TestCase):
         result = self.pay.pay_with_coin(
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
-        self.assertEqual(result.error_code, "CONFLICT")
+        self.assertEqual(result.error_code, "INSUFFICIENT_COINS")

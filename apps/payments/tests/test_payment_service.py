@@ -85,7 +85,7 @@ class PaymentServiceTests(TestCase):
 
     def test_verify_purchase_requires_active_payment_round(self) -> None:
         result = self._verify(self.boy, "tok", "safe_reveal_male")
-        self.assertEqual(result.error_code, "CONFLICT")
+        self.assertEqual(result.error_code, "NO_ACTIVE_PAYMENT")
 
     def test_verify_purchase_records_side(self) -> None:
         self._reach_safe_payment()
@@ -100,6 +100,13 @@ class PaymentServiceTests(TestCase):
         second = self._verify(self.boy, "tok_same", "safe_reveal_male")
         self.assertEqual(first.data.id, second.data.id)
         self.assertEqual(Payment.objects.filter(user=self.boy).count(), 1)
+
+    def test_verify_purchase_already_paid_this_cycle(self) -> None:
+        self._reach_safe_payment()
+        self._verify(self.boy, "tok_b1", "safe_reveal_male")  # boy pays his side
+        # A fresh token, same cycle → distinct ALREADY_PAID code (not idempotent reuse).
+        result = self._verify(self.boy, "tok_b2", "safe_reveal_male")
+        self.assertEqual(result.error_code, "ALREADY_PAID")
 
     def test_reveal_purpose_not_purchasable(self) -> None:
         self._reach_reveal_payment()
@@ -158,4 +165,4 @@ class PaymentServiceTests(TestCase):
         result = self.service.pay_with_coin(
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
-        self.assertEqual(result.error_code, "CONFLICT")
+        self.assertEqual(result.error_code, "NO_ACTIVE_PAYMENT")

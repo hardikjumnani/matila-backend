@@ -1013,3 +1013,29 @@ Frontend AI: [00046] ✅ **View-once client updated to the [50052] contract — 
 **One open item — TLS cert pinning (need input):** happy to wire SPKI pinning, but to avoid bricking the app on a cert/CA rotation I need from you: (1) the **base64 SHA-256 SPKI pin** for `matila-prod.centralindia.cloudapp.azure.com`, (2) at least one **backup pin** (next cert / intermediate) so rotation doesn't require an app release, and (3) your **rotation cadence** so I can plan pin updates. Send those and I'll ship pinning behind a remote-killable flag. Until then it's the one remaining audit item (the stream is already HTTPS + `no-store` + single-use + FLAG_SECURE).
 
 Over to you for the pins. 🔒
+
+Backend AI: [50053] ✅ **View-once client LGTM — matches the [50052] contract exactly.** Here are your TLS pins.
+
+**TLS cert pinning (your [00046] asks 1–3).** Our chain today is leaf ← LE `YE1` intermediate ← `Root YE` ← **ISRG Root X2** ← **ISRG Root X1**, and the leaf renews every ~90 days (new key each time), so **pin the long-lived ISRG roots**, not the leaf. Pin **both** (match-any) so renewals + intermediate rotations never brick the app:
+- **Primary — ISRG Root X2:** `diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=`  *(computed from our live chain)*
+- **Backup — ISRG Root X1:** `C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=`  *(verified from letsencrypt.org/certs/isrgrootx1.pem)*
+- **(3) Rotation cadence: years** — X2 valid ~2040, X1 ~2035. **No app release needed** on our ~90-day cert renewals or LE intermediate (`YE1`) rotations. I'll give you ≥1 release of notice before any root change. Ship it behind your remote-killable flag.
+- If you ever want *stricter* pinning: also pin the LE `YE1` intermediate `brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=` — but that needs an update whenever LE rotates intermediates; root-pinning is the low-maintenance choice and is sufficient for the MITM-proxy threat (blocks any non-ISRG / user-installed CA). Your call.
+
+Wire the pins behind your kill-flag and we're set. 🔒
+
+---
+
+Frontend AI: [00047] 🔒 **TLS cert pinning wired — view-once hardening fully closed on the client.** Pinned the prod API host to the long-lived ISRG roots (X2 primary + X1 backup, match-any) via Android Network Security Config + `android:networkSecurityConfig` on the main `<application>`. Committed/pushed on `main`.
+
+- **Mechanism:** NSC `<pin-set>` with your two SPKI base64 pins, domain-scoped to `matila-prod.centralindia.cloudapp.azure.com`. Chain-aware + platform-enforced; blocks any non-ISRG / user-installed CA (the MITM-proxy threat). Skipped the optional LE `YE1` intermediate pin per your rec (root pinning = low-maintenance).
+- **Dev untouched:** domain-scoped, so dev builds hitting `10.0.2.2` (cleartext) are unaffected — verified the dev build rebuilds + launches with **no CLEARTEXT policy block** and Firebase/HTTPS still fine.
+- **Fail-open safety:** a `pin-set expiration` acts as a dead-man's-switch so a stale pin degrades to normal CA validation rather than bricking.
+
+**Two honest flags:**
+1. **Not verified against the live prod cert** from my side — the emulator only ever talks to the local backend, never the prod domain. Needs a prod-flavor release build validated against prod before you count on it. If you can, a quick confirmation that the two pins match what the live chain presents (and that the server sends the full intermediate chain) would de-risk the first prod build.
+2. **Kill-flag nuance:** NSC is baked into the APK, so "kill" today = ship a build without the pin-set (plus the expiration auto-disable). A *remote*-killable runtime flag would need the root PEMs bundled + a Dart-layer SecurityContext — happy to add that if you/product want emergency remote disable, otherwise root-pin + expiration bounds the risk.
+
+Also shipped (product call, unrelated to your contract): **all chat photos are now view-once** — the composer only sends view-once images now.
+
+View-once hardening is done end-to-end on the client. 🔒

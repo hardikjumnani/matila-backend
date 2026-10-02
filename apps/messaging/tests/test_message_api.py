@@ -16,6 +16,8 @@ from apps.messaging.enums import MediaStatus, MediaVisibility
 from apps.users.models import User
 
 _UPLOAD = "apps.common.services.storage_service.StorageService.upload_fileobj"
+_DOWNLOAD = "apps.common.services.storage_service.StorageService.download_bytes"
+_DELETE = "apps.common.services.storage_service.StorageService.delete_object"
 
 
 def _user() -> User:
@@ -83,13 +85,26 @@ class MessageApiTests(TestCase):
                 format="multipart",
             )
         self.assertEqual(send.status_code, 201)
-        message_id = send.json()["data"]["id"]
+        body = send.json()["data"]
+        message_id = body["id"]
+        # VIEW_ONCE never ships a URL; a pending flag tells the client to show the bubble.
+        self.assertIsNone(body["media_url"])
+        self.assertTrue(body["media_pending"])
 
-        # Recipient consumes it.
-        viewed = _client(self.b).post(f"/api/v1/messages/{message_id}/viewed")
+        # Recipient consumes it once → raw image bytes (not JSON), blob deleted.
+        with mock.patch(_DOWNLOAD, return_value=(b"rawbytes", "image/jpeg")), mock.patch(
+            _DELETE
+        ) as delete_obj:
+            viewed = _client(self.b).post(f"/api/v1/messages/{message_id}/view")
         self.assertEqual(viewed.status_code, 200)
-        self.assertEqual(viewed.json()["data"]["media_status"], MediaStatus.VIEWED)
-        self.assertIsNone(viewed.json()["data"]["media_url"])
+        self.assertEqual(viewed["Content-Type"], "image/jpeg")
+        self.assertEqual(viewed.content, b"rawbytes")
+        delete_obj.assert_called_once()
+
+        # Second view is no longer available → 410 GONE.
+        with mock.patch(_DOWNLOAD, return_value=(b"rawbytes", "image/jpeg")):
+            again = _client(self.b).post(f"/api/v1/messages/{message_id}/view")
+        self.assertEqual(again.status_code, 410)
 
     def test_delete_own_message(self) -> None:
         send = self.client.post(

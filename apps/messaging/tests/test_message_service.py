@@ -36,6 +36,7 @@ class MessageServiceTests(TestCase):
         self.storage.upload_fileobj.side_effect = (
             lambda fileobj, key, content_type=None: key
         )
+        self.storage.download_bytes.return_value = (b"imgbytes", "image/jpeg")
         self.service = MessageService(
             chat_service=self.chats,
             storage_service=self.storage,
@@ -128,11 +129,16 @@ class MessageServiceTests(TestCase):
             content_type="image/jpeg",
             visibility=MediaVisibility.VIEW_ONCE,
         ).data
-        # Recipient consumes it.
-        viewed = self.service.mark_viewed(message_id=str(image.id), user=self.b)
-        self.assertEqual(viewed.data.media_status, MediaStatus.VIEWED)
+        # Recipient consumes it exactly once: gets the bytes back, blob destroyed.
+        viewed = self.service.view_once(message_id=str(image.id), user=self.b)
+        self.assertTrue(viewed.success)
+        data, content_type = viewed.data
+        self.assertEqual(data, b"imgbytes")
+        image.refresh_from_db()
+        self.assertEqual(image.media_status, MediaStatus.VIEWED)
+        self.storage.delete_object.assert_called_once()
         # Second view is no longer available.
-        again = self.service.mark_viewed(message_id=str(image.id), user=self.b)
+        again = self.service.view_once(message_id=str(image.id), user=self.b)
         self.assertEqual(again.error_code, "MEDIA_NOT_AVAILABLE")
 
     def test_sender_cannot_consume_own_view_once(self) -> None:
@@ -145,7 +151,7 @@ class MessageServiceTests(TestCase):
             visibility=MediaVisibility.VIEW_ONCE,
         ).data
         self.assertEqual(
-            self.service.mark_viewed(message_id=str(image.id), user=self.a).error_code,
+            self.service.view_once(message_id=str(image.id), user=self.a).error_code,
             "FORBIDDEN",
         )
 

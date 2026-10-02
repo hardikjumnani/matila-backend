@@ -173,47 +173,79 @@ class MessageService:
 
     # -- View-once media ----------------------------------------------------
 
-    def mark_viewed(self, *, message_id: str, user: User) -> ServiceResult[Message]:
-        """Consume a view-once image: mark it viewed so it is no longer served."""
-        message = self.get_message(message_id)
-        if message is None:
-            return ServiceResult.fail("RESOURCE_NOT_FOUND", "Message not found.")
-        if (
-            message.message_type != MessageType.IMAGE
-            or message.media_visibility != MediaVisibility.VIEW_ONCE
-        ):
-            return ServiceResult.fail(
-                "VALIDATION_ERROR", "Message is not view-once media."
+    def view_once(
+        self, *, message_id: str, user: User
+    ) -> ServiceResult[tuple[bytes, str]]:
+        """Consume a view-once image EXACTLY ONCE and return its bytes + content
+        type for server-mediated, one-time delivery.
+
+        Security model (see docs/VIEW_ONCE_HARDENING.md): the media URL is never
+        exposed in any payload; the recipient fetches the bytes only through this
+        call. The AVAILABLE→VIEWED transition is row-locked so concurrent taps
+        can't double-consume, and the blob is deleted immediately after so a
+        captured request can't be replayed.
+        """
+        key: str | None = None
+        with transaction.atomic():
+            message = (
+                Message.objects.select_for_update()
+                .select_related("chat")
+                .filter(id=message_id)
+                .first()
             )
-        if not self._chats.is_participant(message.chat, user):
-            return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
-        if message.sender_id == user.id:
-            return ServiceResult.fail(
-                "FORBIDDEN", "The sender cannot consume their own view-once media."
-            )
-        if message.media_status != MediaStatus.AVAILABLE:
-            return ServiceResult.fail(
-                "MEDIA_NOT_AVAILABLE", "This media is no longer available."
+            if message is None:
+                return ServiceResult.fail("RESOURCE_NOT_FOUND", "Message not found.")
+            if (
+                message.message_type != MessageType.IMAGE
+                or message.media_visibility != MediaVisibility.VIEW_ONCE
+            ):
+                return ServiceResult.fail(
+                    "VALIDATION_ERROR", "Message is not view-once media."
+                )
+            if not self._chats.is_participant(message.chat, user):
+                return ServiceResult.fail("FORBIDDEN", "You are not in this chat.")
+            if message.sender_id == user.id:
+                return ServiceResult.fail(
+                    "FORBIDDEN", "The sender cannot view their own view-once media."
+                )
+            if message.media_status != MediaStatus.AVAILABLE:
+                return ServiceResult.fail(
+                    "MEDIA_NOT_AVAILABLE", "This media is no longer available."
+                )
+
+            key = message.media_url
+            message.viewed_at = timezone.now()
+            message.media_status = MediaStatus.VIEWED
+            message.save(update_fields=["viewed_at", "media_status"])
+            # Notify the sender (not the viewer) that their media was consumed.
+            chat_id, mid, viewer_id = str(message.chat_id), str(message.id), user.id
+            transaction.on_commit(
+                lambda: broadcast_to_chat(
+                    chat_id,
+                    "message.viewed",
+                    {"message_id": mid},
+                    exclude_user_id=viewer_id,
+                )
             )
 
-        message.viewed_at = timezone.now()
-        message.media_status = MediaStatus.VIEWED
-        message.save(update_fields=["viewed_at", "media_status"])
-        # Notify the sender (not the viewer) that their media was consumed.
-        chat_id, message_id, viewer_id = (
-            str(message.chat_id),
-            str(message.id),
-            user.id,
-        )
-        transaction.on_commit(
-            lambda: broadcast_to_chat(
-                chat_id,
-                "message.viewed",
-                {"message_id": message_id},
-                exclude_user_id=viewer_id,
+        # Consumed. Fetch the bytes, then destroy the blob so nothing is replayable.
+        from apps.common.services.storage_service import StorageError
+
+        try:
+            data, content_type = self._storage.download_bytes(key)
+        except StorageError:
+            logger.error(
+                "view-once download failed for message %s (already consumed)",
+                message_id,
             )
-        )
-        return ServiceResult.ok(message)
+            return ServiceResult.fail(
+                "INTERNAL_SERVER_ERROR", "Could not load the media."
+            )
+        try:
+            self._storage.delete_object(key)
+        except Exception:  # noqa: BLE001 — best-effort; the view is already consumed.
+            logger.warning("view-once blob delete failed for message %s", message_id)
+        return ServiceResult.ok((data, content_type))
 
     # -- Deletion -----------------------------------------------------------
 

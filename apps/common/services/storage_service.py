@@ -107,6 +107,22 @@ class StorageService:
             raise StorageError("Failed to upload object to storage.") from exc
         return key
 
+    def download_bytes(self, key: str) -> tuple[bytes, str]:
+        """Download a blob's bytes + content type for one-time, server-mediated
+        delivery (view-once media). The bytes never leave via a shareable URL."""
+        if not key:
+            raise StorageError("Missing media key.")
+        try:
+            blob = self._client().get_blob_client(container=self._container, blob=key)
+            stream = blob.download_blob()
+            data = stream.readall()
+            settings_obj = getattr(stream.properties, "content_settings", None)
+            content_type = getattr(settings_obj, "content_type", None) or "image/jpeg"
+            return data, content_type
+        except AzureError as exc:
+            logger.error("Blob download failed for key %s: %s", key, exc)
+            raise StorageError("Failed to download object from storage.") from exc
+
     def generate_presigned_url(self, key: str, *, expires_in: int | None = None) -> str:
         """Return a time-limited SAS URL granting read access to ``key``."""
         if not key:

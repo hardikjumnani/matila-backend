@@ -25,6 +25,7 @@ class MessageSerializer(serializers.Serializer):
     message_type = serializers.CharField()
     text_content = serializers.SerializerMethodField()
     media_url = serializers.SerializerMethodField()
+    media_pending = serializers.SerializerMethodField()
     media_visibility = serializers.CharField()
     media_status = serializers.CharField(allow_blank=True)
     viewed_at = serializers.DateTimeField(allow_null=True)
@@ -40,7 +41,21 @@ class MessageSerializer(serializers.Serializer):
             return None
         if obj.media_status != MediaStatus.AVAILABLE:
             return None
+        # VIEW_ONCE never exposes a URL — the recipient fetches the bytes once via
+        # POST /messages/{id}/view (server-mediated, exactly-once, delete-after).
+        if obj.media_visibility == MediaVisibility.VIEW_ONCE:
+            return None
         return resolve_media_url(obj.media_url)
+
+    def get_media_pending(self, obj) -> bool:
+        """True for an un-viewed VIEW_ONCE image — the client shows the 'tap to
+        view' bubble and calls POST /messages/{id}/view to consume it."""
+        return (
+            not obj.is_deleted
+            and obj.message_type == MessageType.IMAGE
+            and obj.media_status == MediaStatus.AVAILABLE
+            and obj.media_visibility == MediaVisibility.VIEW_ONCE
+        )
 
 
 class SendTextMessageSerializer(serializers.Serializer):

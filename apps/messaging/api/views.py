@@ -9,6 +9,7 @@ MessageService.
 
 from __future__ import annotations
 
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import ListAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -96,19 +97,31 @@ class ChatImageMessageView(APIView):
         return Response(MessageSerializer(result.data).data, status=201)
 
 
-class MessageViewedView(APIView):
-    """POST /messages/{id}/viewed — consume a view-once image."""
+class MessageViewOnceView(APIView):
+    """POST /messages/{id}/view — consume a view-once image and stream its bytes.
+
+    The image is delivered exactly once, server-mediated: the body is the raw
+    image (no shareable URL is ever exposed), the AVAILABLE→VIEWED transition is
+    atomic, and the blob is deleted immediately after. A second call returns
+    410 MEDIA_NOT_AVAILABLE.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.service = MessageService()
 
-    @extend_schema(request=None, responses=MessageSerializer)
-    def post(self, request: Request, message_id: str) -> Response:
-        result = self.service.mark_viewed(message_id=message_id, user=request.user)
+    @extend_schema(request=None, responses=bytes)
+    def post(self, request: Request, message_id: str):
+        result = self.service.view_once(message_id=message_id, user=request.user)
         if result.failed:
             return service_failure_response(result)
-        return Response(MessageSerializer(result.data).data)
+        data, content_type = result.data
+        response = HttpResponse(data, content_type=content_type)
+        response["Cache-Control"] = "no-store"
+        response["Content-Disposition"] = "inline"
+        return response
 
 
 class MessageDeleteView(APIView):

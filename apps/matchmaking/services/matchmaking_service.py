@@ -20,13 +20,16 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 
-from apps.chats.models import Chat
+from apps.chats.enums import ChatStatus
+from apps.chats.models import Chat, ChatParticipant
 from apps.common.results import ServiceResult
+from apps.matchmaking.constants import LOBBY_BUCKET_SIZE
 from apps.matchmaking.enums import MatchQueueStatus
 from apps.matchmaking.models import MatchQueue
-from apps.users.enums import VerificationStatus
+from apps.users.enums import AccountStatus, Intent, VerificationStatus
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -42,7 +45,13 @@ class JoinResult:
 class MatchmakingService:
     """Queue management and random compatible matching."""
 
-    def __init__(self, *, chat_service=None, notification_service=None) -> None:
+    def __init__(
+        self,
+        *,
+        chat_service=None,
+        notification_service=None,
+        presence_service=None,
+    ) -> None:
         if chat_service is None:
             from apps.chats.services.chat_service import ChatService
 
@@ -53,8 +62,13 @@ class MatchmakingService:
             )
 
             notification_service = NotificationService()
+        if presence_service is None:
+            from apps.matchmaking.services.presence_service import PresenceService
+
+            presence_service = PresenceService()
         self._chats = chat_service
         self._notifications = notification_service
+        self._presence = presence_service
 
     # -- Eligibility --------------------------------------------------------
 
@@ -184,15 +198,69 @@ class MatchmakingService:
             }
         return {"state": "IDLE"}
 
-    def get_active_user_range(self) -> dict:
-        """Approximate count of online searchers as a coarse range (not exact)."""
-        count = MatchQueue.objects.filter(
-            status=MatchQueueStatus.SEARCHING, is_online=True
-        ).count()
-        # CHOSEN bucketing: round down to the nearest 10 to avoid exposing an
-        # exact live count.
-        lower = (count // 10) * 10
-        return {"min": lower, "max": lower + 10, "label": f"{lower}-{lower + 10}"}
+    @staticmethod
+    def _plus_range(count: int) -> dict:
+        """Coarse 'N+' range: floor to the nearest bucket. e.g. 27 -> {20, "20+"}."""
+        floor = (count // LOBBY_BUCKET_SIZE) * LOBBY_BUCKET_SIZE
+        return {"floor": floor, "label": f"{floor}+"}
+
+    def _eligible_users(self):
+        """Verified, active, onboarded users (the 'real' population)."""
+        return User.objects.filter(
+            verification_status=VerificationStatus.APPROVED,
+            account_status=AccountStatus.ACTIVE,
+            onboarding_completed_at__isnull=False,
+        )
+
+    def get_lobby_stats(self, user: User) -> dict:
+        """Online counts for the slide-to-match screen, as 'N+' ranges:
+        - total_online: everyone currently online (app foregrounded).
+        - compatible_online: online users this person can actually match with
+          (same intent, mutual gender compatibility, not self, not already in a
+          chat)."""
+        total_online = self._presence.online_count()
+        online_ids = self._presence.online_ids()
+        online_ids.discard(str(user.id))
+
+        compatible = 0
+        if online_ids:
+            qs = self._eligible_users().filter(
+                id__in=online_ids, intent=user.intent
+            ).exclude(id=user.id)
+            # Their gender must be one I accept (empty prefs = no restriction).
+            if user.gender_preferences:
+                qs = qs.filter(gender__in=user.gender_preferences)
+            # My gender must be one they accept (empty prefs = no restriction).
+            qs = qs.filter(
+                Q(gender_preferences=[])
+                | Q(gender_preferences__contains=[user.gender])
+            )
+            # Exclude anyone already in an ongoing chat (not available to match).
+            busy_ids = ChatParticipant.objects.filter(
+                chat__status__in=(
+                    ChatStatus.ACTIVE,
+                    ChatStatus.EXTENDED,
+                    ChatStatus.REVEALED,
+                )
+            ).values_list("user_id", flat=True)
+            compatible = qs.exclude(id__in=busy_ids).count()
+
+        return {
+            "total_online": self._plus_range(total_online),
+            "compatible_online": self._plus_range(compatible),
+        }
+
+    def get_intent_stats(self) -> dict:
+        """Per-intent counts (all intents), each as an 'N+' range — for the
+        onboarding intent picker's social proof."""
+        rows = (
+            self._eligible_users().values("intent").annotate(c=Count("id"))
+        )
+        counts = {value: 0 for value in Intent.values}
+        for row in rows:
+            if row["intent"] in counts:
+                counts[row["intent"]] = row["c"]
+        return {intent: self._plus_range(c) for intent, c in counts.items()}
 
     # -- Maintenance (Step 8 task) -----------------------------------------
 

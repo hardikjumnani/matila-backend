@@ -71,8 +71,27 @@ class MatchmakingApiTests(TestCase):
         response = _client_for(user).post("/api/v1/matchmaking/heartbeat")
         self.assertEqual(response.status_code, 404)
 
-    def test_active_range(self) -> None:
+    def test_lobby_stats(self) -> None:
         user = _eligible(Gender.MALE, Intent.CASUAL, [Gender.FEMALE])
-        response = _client_for(user).get("/api/v1/matchmaking/active-range")
+        response = _client_for(user).get("/api/v1/matchmaking/lobby-stats")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("label", response.json()["data"])
+        data = response.json()["data"]
+        self.assertIn("label", data["total_online"])
+        self.assertIn("label", data["compatible_online"])
+
+    def test_intent_stats_available_to_authenticated(self) -> None:
+        # Shown during onboarding → works even for a not-yet-verified user.
+        user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        user.verification_status = VerificationStatus.PENDING
+        user.save(update_fields=["verification_status"])
+        response = _client_for(user).get("/api/v1/matchmaking/intent-stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(set(data), {"RELATIONSHIP", "FRIENDSHIP", "CASUAL"})
+        self.assertIn("label", data["FRIENDSHIP"])
+
+    def test_presence_heartbeat(self) -> None:
+        user = _eligible(Gender.MALE, Intent.CASUAL, [Gender.FEMALE])
+        response = _client_for(user).post("/api/v1/presence/heartbeat")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["data"]["ok"])

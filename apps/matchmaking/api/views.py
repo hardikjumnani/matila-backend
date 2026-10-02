@@ -82,9 +82,41 @@ class MatchmakingHeartbeatView(_MatchmakingBaseView):
         return Response({"ok": True})
 
 
-class MatchmakingActiveRangeView(_MatchmakingBaseView):
-    """GET /matchmaking/active-range — approximate active-user range."""
+class LobbyStatsView(_MatchmakingBaseView):
+    """GET /matchmaking/lobby-stats — online + compatible-online 'N+' ranges for
+    the slide-to-match screen."""
 
     @extend_schema(responses=OpenApiResponse(description="See endpoint description."))
     def get(self, request: Request) -> Response:
-        return Response(self.service.get_active_user_range())
+        return Response(self.service.get_lobby_stats(request.user))
+
+
+class IntentStatsView(APIView):
+    """GET /matchmaking/intent-stats — per-intent 'N+' counts for the onboarding
+    picker. Auth only (shown before verification/onboarding completes)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.service = MatchmakingService()
+
+    @extend_schema(responses=OpenApiResponse(description="See endpoint description."))
+    def get(self, request: Request) -> Response:
+        return Response(self.service.get_intent_stats())
+
+
+class PresenceHeartbeatView(APIView):
+    """POST /presence/heartbeat — mark the caller online (app foregrounded).
+    Auth only; best-effort (no-op if presence storage is unavailable)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=None, responses=OpenApiResponse(description="Presence recorded.")
+    )
+    def post(self, request: Request) -> Response:
+        from apps.matchmaking.services.presence_service import PresenceService
+
+        PresenceService().heartbeat(request.user.id)
+        return Response({"ok": True})

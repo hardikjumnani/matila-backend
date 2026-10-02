@@ -137,9 +137,51 @@ class MatchmakingServiceTests(TestCase):
         entry = MatchQueue.objects.get(user=user)
         self.assertEqual(entry.status, MatchQueueStatus.TIMEOUT)
 
-    def test_active_user_range_is_bucketed(self) -> None:
-        for _ in range(3):
-            self.service.join(_eligible(Gender.MALE, Intent.CASUAL, [Gender.MALE]))
-        rng = self.service.get_active_user_range()
-        self.assertEqual(rng["min"], 0)
-        self.assertEqual(rng["max"], 10)
+    def test_plus_range_buckets(self) -> None:
+        pr = self.service._plus_range
+        self.assertEqual(pr(0), {"floor": 0, "label": "0+"})
+        self.assertEqual(pr(9), {"floor": 0, "label": "0+"})
+        self.assertEqual(pr(10), {"floor": 10, "label": "10+"})
+        self.assertEqual(pr(27), {"floor": 20, "label": "20+"})
+
+    def test_intent_stats_all_intents(self) -> None:
+        for _ in range(10):
+            _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        _eligible(Gender.FEMALE, Intent.FRIENDSHIP, [Gender.MALE])
+        stats = self.service.get_intent_stats()
+        self.assertEqual(set(stats), {"RELATIONSHIP", "FRIENDSHIP", "CASUAL"})
+        self.assertEqual(stats["RELATIONSHIP"], {"floor": 10, "label": "10+"})
+        self.assertEqual(stats["FRIENDSHIP"], {"floor": 0, "label": "0+"})
+        self.assertEqual(stats["CASUAL"], {"floor": 0, "label": "0+"})
+
+    def test_lobby_stats_compatible_filtering(self) -> None:
+        me = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        ids = {str(me.id)}
+        # 10 compatible: female / relationship / accepts males.
+        for _ in range(10):
+            ids.add(str(_eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE]).id))
+        # 10 incompatible (must all be excluded, else the count crosses to 20+):
+        for _ in range(4):  # wrong intent
+            ids.add(str(_eligible(Gender.FEMALE, Intent.CASUAL, [Gender.MALE]).id))
+        for _ in range(3):  # wrong gender (I want FEMALE)
+            ids.add(str(_eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.MALE]).id))
+        for _ in range(3):  # she doesn't accept males
+            ids.add(str(_eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.FEMALE]).id))
+        # a compatible user who is BUSY in an active chat -> excluded.
+        busy = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        partner = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        ChatService(notification_service=mock.MagicMock()).create_chat(busy, partner)
+        ids.add(str(busy.id))
+
+        presence = mock.MagicMock()
+        presence.online_ids.return_value = set(ids)
+        presence.online_count.return_value = len(ids)
+        svc = MatchmakingService(
+            chat_service=ChatService(notification_service=mock.MagicMock()),
+            notification_service=mock.MagicMock(),
+            presence_service=presence,
+        )
+        stats = svc.get_lobby_stats(me)
+        # Exactly the 10 compatible; the 10 incompatible would push it to 20+ if leaked.
+        self.assertEqual(stats["compatible_online"], {"floor": 10, "label": "10+"})
+        self.assertEqual(stats["total_online"]["floor"], (len(ids) // 10) * 10)

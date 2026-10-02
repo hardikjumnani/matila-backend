@@ -8,6 +8,7 @@ OpenAPI schema/documentation, and a health probe.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import (
@@ -37,3 +38,9 @@ urlpatterns = [
     # Versioned API surface (grows per module through Step 6).
     path("api/v1/", include("config.api_urls")),
 ]
+
+# Dev-only: local admin panel UI (reviews verifications against the admin API).
+if settings.DEBUG:
+    from apps.admin_panel.ui_views import admin_panel_ui
+
+    urlpatterns += [path("admin-panel/", admin_panel_ui, name="admin-panel-ui")]

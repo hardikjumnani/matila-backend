@@ -48,3 +48,6 @@ CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=boo
 # safe reveal / extension / store complete with placeholder tokens). On by
 # default in development; overridable.
 PAYMENTS_DEV_BYPASS = config("PAYMENTS_DEV_BYPASS", default=True, cast=bool)
+
+# Accept "dev:<email>" bearer tokens locally (admin panel / harness). Dev only.
+AUTH_DEV_BYPASS = config("AUTH_DEV_BYPASS", default=True, cast=bool)

@@ -10,6 +10,7 @@ every protected endpoint regardless of token validity.
 
 from __future__ import annotations
 
+from django.conf import settings
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
@@ -60,6 +61,20 @@ class FirebaseAuthentication(BaseAuthentication):
         if token is None:
             # No credentials supplied → anonymous; permissions decide access.
             return None
+
+        # Dev-only bypass: a "dev:<email>" token authenticates as that existing
+        # user WITHOUT contacting Firebase. Gated on AUTH_DEV_BYPASS, which is
+        # False in base + production settings, so this can never run in prod.
+        # Used by the local admin panel / harness. See config.settings.development.
+        if settings.AUTH_DEV_BYPASS and token.startswith("dev:"):
+            email = token[len("dev:") :].strip()
+            user = User.objects.filter(college_email__iexact=email).first()
+            if user is None:
+                raise AuthenticationFailed(
+                    {"code": "UNAUTHORIZED", "detail": "Dev bypass: user not found."}
+                )
+            self._enforce_account_status(user)
+            return (user, {"dev_bypass": True, "email": email})
 
         try:
             claims = verify_id_token(token)

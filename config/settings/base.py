@@ -458,6 +458,10 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_PATH: str = config(
 # turned on only in the development settings module.
 PAYMENTS_DEV_BYPASS: bool = config("PAYMENTS_DEV_BYPASS", default=False, cast=bool)
 
+# Dev-only auth bypass: accept "dev:<email>" bearer tokens (no Firebase). MUST be
+# False everywhere except local development (the admin panel / harness use it).
+AUTH_DEV_BYPASS: bool = config("AUTH_DEV_BYPASS", default=False, cast=bool)
+
 
 # ---------------------------------------------------------------------------
 # CORS / CSRF

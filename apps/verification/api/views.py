@@ -43,6 +43,10 @@ class VerificationStatusView(_VerificationBaseView):
                 "latest_request": (
                     VerificationRequestSerializer(latest).data if latest else None
                 ),
+                # College + launch state drive the "verified — launching in ⏳"
+                # countdown the client shows while waiting for launch.
+                "college": status["college"],
+                "launched": status["launched"],
             }
         )
 

@@ -79,6 +79,7 @@ _PANEL_HTML = r"""<!doctype html>
     <option value="ALL">All</option>
   </select>
   <button onclick="loadList()">Refresh</button>
+  <button onclick="loadColleges()">Colleges</button>
 </header>
 
 <div class="wrap">
@@ -188,6 +189,49 @@ async function act(id, action){
     await api("/admin/verifications/"+id+"/"+action, "POST", {notes});
     toast(action.replace("-"," ")+" ✓");
     await loadList(); await openDetail(id);
+  } catch(e){ toast(e.message, false); }
+}
+// --- Colleges (launch-date management) ---
+function toLocalInput(iso){
+  if(!iso) return "";
+  const d=new Date(iso); if(isNaN(d)) return "";
+  const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+async function loadColleges(){
+  if(!TOKEN){ toast("sign in first", false); return; }
+  try {
+    const list = await api("/admin/colleges");
+    const el=document.getElementById("detail");
+    el.innerHTML = `<strong>Colleges</strong>
+      <p class="muted" style="margin:6px 0 12px">Set each college's launch date — verified members enter the app at launch.</p>
+      ${list.map(c=>`
+        <div class="card" style="cursor:default">
+          <div class="row" style="justify-content:space-between">
+            <strong>${c.name}</strong>
+            <span class="pill ${c.is_launched?'APPROVED':'PENDING'}">${c.is_launched?'LAUNCHED':'PRE-LAUNCH'}</span>
+          </div>
+          <div class="muted" style="font-size:12px">code <code>${c.code}</code> · ${c.user_count} user(s) ·
+            ${(c.allowed_email_domains||[]).join(', ')||'no domains'}</div>
+          <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+            <input type="datetime-local" id="ld_${c.id}" value="${toLocalInput(c.launch_date)}"/>
+            <button class="primary" onclick="saveLaunch('${c.id}')">Save launch</button>
+            <button onclick="saveLaunch('${c.id}', true)">Unset</button>
+          </div>
+        </div>`).join("")}`;
+  } catch(e){ toast(e.message, false); }
+}
+async function saveLaunch(id, clear=false){
+  let launch_date=null;
+  if(!clear){
+    const v=(document.getElementById("ld_"+id)||{}).value;
+    if(!v){ toast("pick a date or use Unset", false); return; }
+    launch_date=new Date(v).toISOString();
+  }
+  try {
+    await api("/admin/colleges/"+id, "PATCH", {launch_date});
+    toast("launch date saved ✓");
+    await loadColleges();
   } catch(e){ toast(e.message, false); }
 }
 // boot

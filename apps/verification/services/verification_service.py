@@ -86,9 +86,15 @@ class VerificationService:
         ).exists()
 
     def get_status(self, user: User) -> dict[str, Any]:
+        from apps.colleges.services.college_service import CollegeService
+
+        info = CollegeService().launch_info(user)
         return {
             "verification_status": user.verification_status,
             "latest_request": self.get_latest_request(user),
+            # Drives the "you're in — launching in ⏳" countdown page.
+            "college": info["college"],
+            "launched": info["launched"],
         }
 
     # -- Draft / attempt management ----------------------------------------
@@ -352,11 +358,24 @@ class VerificationService:
             entity_id=str(request.id),
             metadata={"user_id": str(user.id), "status": new_status},
         )
+        body = notification_body
+        if new_status == VerificationStatus.APPROVED:
+            from apps.colleges.services.college_service import CollegeService
+
+            info = CollegeService().launch_info(user)
+            college = info["college"]
+            if college and not info["launched"] and college.get("launch_date"):
+                body = (
+                    f"You're verified! Matila launches at {college['name']} soon — "
+                    "watch the countdown."
+                )
+            else:
+                body = "You're verified! You can start matching now."
         self._notifications.create_notification(
             user=user,
             type=notification_type,
             title=notification_title,
-            body=notification_body,
+            body=body,
         )
         logger.info("Verification request %s -> %s", request.id, new_status)
         return ServiceResult.ok(request)

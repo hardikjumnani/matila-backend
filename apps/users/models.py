@@ -21,10 +21,47 @@ from apps.common.models import TimeStampedUUIDModel
 from .enums import AccountStatus, Gender, Intent, VerificationStatus
 
 
+def _default_college_id():
+    """FK default for ``User.college``: the catch-all 'Unassigned' college.
+
+    Keeps the column NOT NULL for any create that omits a college (tests,
+    legacy rows via AddField). Real sign-ups set the resolved college explicitly
+    in the auth bootstrap, so this default is only a safety net.
+    """
+    from datetime import datetime, timezone as _tz
+
+    from apps.colleges.models import College
+
+    return College.objects.get_or_create(
+        code="UNASSIGNED",
+        defaults={
+            "name": "Unassigned",
+            "allowed_email_domains": [],
+            "is_active": False,
+            # Launched "since forever" so the catch-all never imposes the launch
+            # gate on legacy/seed/test accounts parked here. Real sign-ups resolve
+            # to a real college and never land on Unassigned.
+            "launch_date": datetime(2000, 1, 1, tzinfo=_tz.utc),
+        },
+    )[0].pk
+
+
 class User(TimeStampedUUIDModel):
     # --- Identity (immutable anchors set at session bootstrap) --------------
     firebase_uid = models.CharField(max_length=128, unique=True)
     college_email = models.EmailField(unique=True)
+
+    # Every user belongs to exactly one college, resolved from their verified
+    # email domain at sign-up (unknown domains are rejected by the bootstrap).
+    # NOT NULL: the callable default parks any create that omits it on the
+    # catch-all "Unassigned" college, so the column is never null. PROTECT:
+    # colleges are never deleted out from under their members.
+    college = models.ForeignKey(
+        "colleges.College",
+        on_delete=models.PROTECT,
+        related_name="users",
+        default=_default_college_id,
+    )
 
     # --- Profile (collected during onboarding) ------------------------------
     full_name = models.CharField(max_length=150, blank=True, default="")

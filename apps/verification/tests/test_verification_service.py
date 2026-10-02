@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import io
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils import timezone
 
+from apps.colleges.models import College
 from apps.common.services.storage_service import StorageService
 from apps.configuration.services.configuration_service import ConfigurationService
 from apps.users.enums import VerificationStatus
@@ -109,6 +112,21 @@ class VerificationServiceTests(TestCase):
         self.assertIsNotNone(self.user.verified_at)
         self.notifications.create_notification.assert_called_once()
         self.audit.log.assert_called_once()
+
+    def test_approve_prelaunch_message_mentions_countdown(self) -> None:
+        # Approval during the pre-launch window points the user at the countdown.
+        self._complete_draft()
+        request = self.service.submit(self.user).data
+        self.user.college = College.objects.create(
+            code="FUT",
+            name="Future U",
+            allowed_email_domains=["fut.edu"],
+            launch_date=timezone.now() + timedelta(days=5),
+        )
+        self.user.save(update_fields=["college"])
+        self.service.approve(request_id=str(request.id), admin_id="1")
+        body = self.notifications.create_notification.call_args.kwargs["body"]
+        self.assertIn("countdown", body.lower())
 
     def test_review_rejects_unsubmitted_request(self) -> None:
         self.service.generate_gesture(self.user)

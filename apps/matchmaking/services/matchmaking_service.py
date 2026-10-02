@@ -81,6 +81,13 @@ class MatchmakingService:
             return ServiceResult.fail(
                 "VERIFICATION_REQUIRED", "Your account must be verified."
             )
+        from apps.colleges.services.college_service import CollegeService
+
+        if not CollegeService().is_user_launched(user):
+            return ServiceResult.fail(
+                "COLLEGE_NOT_LAUNCHED",
+                "Matchmaking opens when your college launches.",
+            )
         return ServiceResult.ok(None)
 
     # -- Join / leave / heartbeat ------------------------------------------

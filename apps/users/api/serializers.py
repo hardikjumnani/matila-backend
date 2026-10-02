@@ -21,6 +21,8 @@ class UserSerializer(serializers.ModelSerializer):
     """Read-only representation of a user's own profile."""
 
     profile_photo_url = serializers.SerializerMethodField()
+    college = serializers.SerializerMethodField()
+    launched = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -36,6 +38,8 @@ class UserSerializer(serializers.ModelSerializer):
             "verified_at",
             "account_status",
             "onboarding_completed_at",
+            "college",
+            "launched",
             "last_active_at",
             "created_at",
         ]
@@ -43,6 +47,18 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_profile_photo_url(self, obj: User) -> str:
         return resolve_media_url(obj.profile_photo_url)
+
+    def get_college(self, obj: User) -> dict | None:
+        """College + launch state (name, launch_date, launched) — drives the FE
+        countdown + routing."""
+        from apps.colleges.services.college_service import CollegeService
+
+        return CollegeService().launch_info(obj)["college"]
+
+    def get_launched(self, obj: User) -> bool:
+        from apps.colleges.services.college_service import CollegeService
+
+        return CollegeService().is_user_launched(obj)
 
 
 class UserProfileUpdateSerializer(serializers.Serializer):

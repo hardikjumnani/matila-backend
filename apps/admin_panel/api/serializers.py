@@ -11,6 +11,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.audit.models import AuditLog
+from apps.colleges.models import College
 from apps.common.media import resolve_media_url
 from apps.configuration.models import AppConfig, FeatureFlag
 from apps.messaging.enums import MediaStatus
@@ -167,6 +168,46 @@ class SetValueSerializer(serializers.Serializer):
 
     value = serializers.JSONField()
     description = serializers.CharField(required=False, allow_blank=True)
+
+
+class AdminCollegeSerializer(serializers.ModelSerializer):
+    """College view for admin management, with live launch state + member count."""
+
+    is_launched = serializers.BooleanField(read_only=True)
+    user_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = College
+        fields = [
+            "id",
+            "code",
+            "name",
+            "allowed_email_domains",
+            "launch_date",
+            "is_active",
+            "is_launched",
+            "user_count",
+            "created_at",
+        ]
+        read_only_fields = ["id", "is_launched", "user_count", "created_at"]
+
+
+class AdminCollegeUpdateSerializer(serializers.Serializer):
+    """Editable college fields for PATCH /admin/colleges/{id}."""
+
+    name = serializers.CharField(max_length=150, required=False)
+    launch_date = serializers.DateTimeField(required=False, allow_null=True)
+    allowed_email_domains = serializers.ListField(
+        child=serializers.CharField(max_length=255),
+        required=False,
+        allow_empty=True,
+    )
+    is_active = serializers.BooleanField(required=False)
+
+    def validate(self, attrs: dict) -> dict:
+        if not attrs:
+            raise serializers.ValidationError("No editable fields were provided.")
+        return attrs
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

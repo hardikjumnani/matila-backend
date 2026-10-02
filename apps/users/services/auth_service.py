@@ -101,6 +101,17 @@ class AuthService:
         Gender becomes immutable once verification is approved (frozen rule);
         college email is never editable through the API.
         """
+        # Pre-launch lock: once a user has onboarded, the app is countdown-only
+        # until their college launches — no profile edits. (Initial onboarding,
+        # while onboarding_completed_at is None, is still allowed.)
+        if user.onboarding_completed_at is not None:
+            from apps.colleges.services.college_service import CollegeService
+
+            if not CollegeService().is_user_launched(user):
+                return ServiceResult.fail(
+                    "COLLEGE_NOT_LAUNCHED",
+                    "Profile changes are locked until your college launches.",
+                )
         update_fields: list[str] = []
         if full_name is not None:
             user.full_name = full_name
@@ -182,12 +193,23 @@ class AuthService:
         )
         created = False
         if user is None:
+            # Every user must belong to a supported college, resolved from their
+            # verified email domain. Unknown domains are turned away at sign-up.
+            from apps.colleges.services.college_service import CollegeService
+
+            college = CollegeService().resolve_for_email(email)
+            if college is None:
+                return ServiceResult.fail(
+                    "COLLEGE_NOT_SUPPORTED",
+                    "Your college isn't on Matila yet.",
+                )
             user = User.objects.create(
                 firebase_uid=firebase_uid,
                 college_email=email,
+                college=college,
             )
             created = True
-            logger.info("Bootstrapped new user %s", user.id)
+            logger.info("Bootstrapped new user %s (college=%s)", user.id, college.code)
 
         status_error = self._account_status_error(user)
         if status_error is not None:
@@ -222,7 +244,14 @@ class AuthService:
             return NextAction.COMPLETE_ONBOARDING
 
         if user.verification_status == VerificationStatus.APPROVED:
-            return NextAction.GO_HOME
+            # Verified, but the core app opens only at the college's launch. Until
+            # then the client stays on the waiting screen, which renders a
+            # countdown from the college/launched fields in the session payload.
+            from apps.colleges.services.college_service import CollegeService
+
+            if CollegeService().is_user_launched(user):
+                return NextAction.GO_HOME
+            return NextAction.WAIT_FOR_VERIFICATION
 
         if user.verification_status in (
             VerificationStatus.REJECTED,

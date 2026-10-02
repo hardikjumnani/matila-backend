@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from django.urls import path
 
+from apps.admin_panel.api.college_views import (
+    AdminCollegeDetailView,
+    AdminCollegeListView,
+)
 from apps.admin_panel.api.management_views import (
     AdminAppConfigListView,
     AdminAppConfigUpdateView,
@@ -120,6 +124,13 @@ urlpatterns = [
         "admin/app-config/<str:key>",
         AdminAppConfigUpdateView.as_view(),
         name="app-config-update",
+    ),
+    # College management
+    path("admin/colleges", AdminCollegeListView.as_view(), name="college-list"),
+    path(
+        "admin/colleges/<uuid:college_id>",
+        AdminCollegeDetailView.as_view(),
+        name="college-detail",
     ),
     # Audit logs & dashboard
     path("admin/audit-logs", AdminAuditLogListView.as_view(), name="audit-log-list"),

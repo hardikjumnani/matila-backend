@@ -71,6 +71,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.common",
     "apps.users",
+    "apps.colleges",
     "apps.verification",
     "apps.matchmaking",
     "apps.chats",
@@ -415,6 +416,10 @@ CELERY_BEAT_SCHEDULE = {
     "sample-system-metrics": {
         "task": "apps.common.tasks.sample_system_metrics",
         "schedule": 300.0,  # every 5 minutes
+    },
+    "send-launch-notifications": {
+        "task": "apps.colleges.tasks.send_launch_notifications",
+        "schedule": 600.0,  # every 10 minutes (milestones fire within the hour)
     },
 }
 

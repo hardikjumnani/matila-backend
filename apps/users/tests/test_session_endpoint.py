@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.colleges.models import College
 from apps.users.enums import AccountStatus
 from apps.users.models import User
 
@@ -20,6 +23,13 @@ class SessionEndpointTests(TestCase):
         self.client = APIClient()
         self.uid = "fb_" + uuid.uuid4().hex
         self.email = f"{uuid.uuid4().hex}@college.edu"
+        # Supported college for the test sign-up domain (launched in the past).
+        College.objects.create(
+            code="TEST",
+            name="Test College",
+            allowed_email_domains=["college.edu"],
+            launch_date=timezone.now() - timedelta(days=1),
+        )
 
     def _post(self):
         return self.client.post(_URL, HTTP_AUTHORIZATION="Bearer token")

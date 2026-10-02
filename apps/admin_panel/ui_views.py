@@ -147,11 +147,13 @@ async function loadList(){
   } catch(e){ toast(e.message, false); }
 }
 async function openDetail(id){
+  // Immediate feedback before the round-trip: highlight the card + show loading.
+  document.querySelectorAll(".card").forEach(c=>c.classList.remove("active"));
+  const card=document.getElementById("c_"+id); if(card) card.classList.add("active");
+  document.getElementById("detail").innerHTML='<div class="empty">Loading…</div>';
   try {
     const r = await api("/admin/verifications/"+id);
     CURRENT = r;
-    document.querySelectorAll(".card").forEach(c=>c.classList.remove("active"));
-    const c=document.getElementById("c_"+id); if(c) c.classList.add("active");
     const canAct = r.status==="PENDING" || r.status==="RESUBMISSION_REQUIRED";
     document.getElementById("detail").innerHTML = `
       <div class="row" style="justify-content:space-between">
@@ -185,11 +187,15 @@ async function openDetail(id){
 }
 async function act(id, action){
   const notes=(document.getElementById("notes")||{}).value||"";
+  // Disable the action row immediately so clicks feel instant and can't double-fire.
+  const btns=[...document.querySelectorAll(".actions button")];
+  btns.forEach(b=>{ b.disabled=true; });
+  toast(action.replace("-"," ")+"…");
   try {
     await api("/admin/verifications/"+id+"/"+action, "POST", {notes});
     toast(action.replace("-"," ")+" ✓");
     await loadList(); await openDetail(id);
-  } catch(e){ toast(e.message, false); }
+  } catch(e){ btns.forEach(b=>{ b.disabled=false; }); toast(e.message, false); }
 }
 // --- Colleges (launch-date management) ---
 function toLocalInput(iso){

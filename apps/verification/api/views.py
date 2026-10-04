@@ -43,6 +43,9 @@ class VerificationStatusView(_VerificationBaseView):
                 "latest_request": (
                     VerificationRequestSerializer(latest).data if latest else None
                 ),
+                # Admin's note for a resubmission request (banner on the submit
+                # screen); "" unless the user is asked to resubmit.
+                "review_message": status["review_message"],
                 # College + launch state drive the "verified — launching in ⏳"
                 # countdown the client shows while waiting for launch.
                 "college": status["college"],

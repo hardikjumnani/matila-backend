@@ -88,6 +88,26 @@ class AdminVerificationTests(TestCase):
         self.target.refresh_from_db()
         self.assertEqual(self.target.verification_status, VerificationStatus.REJECTED)
 
+    def test_detail_includes_identity_fields(self) -> None:
+        # The admin must see the applicant's name + photo to decide reject vs.
+        # resubmit (B5).
+        self.target.full_name = "Riya Sharma"
+        self.target.profile_photo_url = "profile-photos/riya.jpg"
+        self.target.save(update_fields=["full_name", "profile_photo_url"])
+        response = self.client.get(
+            f"/api/v1/admin/verifications/{self.request.id}"
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()["data"]
+        self.assertEqual(body["full_name"], "Riya Sharma")
+        self.assertTrue(body["profile_photo_url"])
+
+    def test_list_omits_identity_fields(self) -> None:
+        # Queue stays lean — no per-item photo SAS / thumbnails.
+        items = self.client.get("/api/v1/admin/verifications").json()["data"]["items"]
+        self.assertNotIn("full_name", items[0])
+        self.assertNotIn("profile_photo_url", items[0])
+
 
 @override_settings(ADMIN_EMAILS=[_ADMIN_EMAIL])
 class AdminReportTests(TestCase):

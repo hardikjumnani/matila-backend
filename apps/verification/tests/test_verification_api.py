@@ -100,6 +100,22 @@ class VerificationApiTests(TestCase):
         history = self.client.get("/api/v1/verification/history")
         self.assertEqual(len(history.json()["data"]), 1)
 
+    def test_status_includes_review_message_on_resubmission(self) -> None:
+        from apps.verification.models import VerificationRequest
+        from apps.verification.services.verification_service import VerificationService
+
+        self._complete_uploads()
+        self.client.post("/api/v1/verification/submit")
+        req = VerificationRequest.objects.filter(user=self.user).latest(
+            "attempt_number"
+        )
+        VerificationService().request_resubmission(
+            request_id=str(req.id), admin_id="1", notes="Re-upload your ID"
+        )
+        self.user.refresh_from_db()
+        body = self.client.get("/api/v1/verification/status").json()["data"]
+        self.assertEqual(body["review_message"], "Re-upload your ID")
+
     def test_upload_rejects_non_image(self) -> None:
         self.client.get("/api/v1/verification/gesture")
         bad = SimpleUploadedFile("x.txt", b"data", content_type="text/plain")

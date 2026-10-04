@@ -128,6 +128,59 @@ class VerificationServiceTests(TestCase):
         body = self.notifications.create_notification.call_args.kwargs["body"]
         self.assertIn("countdown", body.lower())
 
+    def _submitted(self):
+        self._complete_draft()
+        return self.service.submit(self.user).data
+
+    def test_approve_sets_action_type(self) -> None:
+        self.service.approve(request_id=str(self._submitted().id), admin_id="1")
+        kwargs = self.notifications.create_notification.call_args.kwargs
+        self.assertEqual(kwargs["action_type"], "VERIFICATION_APPROVED")
+
+    def test_reject_notification_carries_note_and_action_type(self) -> None:
+        self.service.reject(
+            request_id=str(self._submitted().id), admin_id="1", notes="ID is blurry"
+        )
+        kwargs = self.notifications.create_notification.call_args.kwargs
+        self.assertEqual(kwargs["action_type"], "VERIFICATION_REJECTED")
+        self.assertEqual(kwargs["body"], "ID is blurry")
+
+    def test_reject_empty_note_uses_generic_body(self) -> None:
+        self.service.reject(
+            request_id=str(self._submitted().id), admin_id="1", notes=""
+        )
+        kwargs = self.notifications.create_notification.call_args.kwargs
+        self.assertEqual(kwargs["action_type"], "VERIFICATION_REJECTED")
+        self.assertTrue(kwargs["body"])  # generic fallback
+
+    def test_resubmission_notification_carries_note_and_action_type(self) -> None:
+        self.service.request_resubmission(
+            request_id=str(self._submitted().id),
+            admin_id="1",
+            notes="Re-upload your selfie",
+        )
+        kwargs = self.notifications.create_notification.call_args.kwargs
+        self.assertEqual(kwargs["action_type"], "VERIFICATION_RESUBMISSION_REQUIRED")
+        self.assertEqual(kwargs["body"], "Re-upload your selfie")
+
+    def test_status_review_message_on_resubmission(self) -> None:
+        request = self._submitted()
+        self.service.request_resubmission(
+            request_id=str(request.id), admin_id="1", notes="Re-upload your ID"
+        )
+        self.user.refresh_from_db()
+        status = self.service.get_status(self.user)
+        self.assertEqual(
+            status["verification_status"], VerificationStatus.RESUBMISSION_REQUIRED
+        )
+        self.assertEqual(status["review_message"], "Re-upload your ID")
+
+    def test_status_no_review_message_when_pending(self) -> None:
+        self._submitted()
+        self.user.refresh_from_db()
+        status = self.service.get_status(self.user)
+        self.assertEqual(status["review_message"], "")
+
     def test_review_rejects_unsubmitted_request(self) -> None:
         self.service.generate_gesture(self.user)
         draft = VerificationRequest.objects.get(user=self.user)

@@ -215,6 +215,15 @@ class AuthService:
         if status_error is not None:
             return status_error
 
+        # Rejected verification is terminal: deny the session so the client
+        # routes to the "not approved" screen (message carried in error.message).
+        # Admin-reversible — flipping the user to RESUBMISSION_REQUIRED lets the
+        # next bootstrap succeed and return SUBMIT_VERIFICATION.
+        if user.verification_status == VerificationStatus.REJECTED:
+            return ServiceResult.fail(
+                "VERIFICATION_REJECTED", self._rejection_message(user)
+            )
+
         user.last_active_at = timezone.now()
         user.save(update_fields=["last_active_at", "updated_at"])
 
@@ -222,6 +231,14 @@ class AuthService:
         return ServiceResult.ok(
             SessionData(user=user, next_action=next_action, created=created)
         )
+
+    def _rejection_message(self, user: User) -> str:
+        """The admin's rejection note for a REJECTED user, or a generic fallback."""
+        from apps.verification.services.verification_service import VerificationService
+
+        latest = VerificationService().get_latest_request(user)
+        note = (latest.review_notes or "").strip() if latest else ""
+        return note or "Your verification was not approved."
 
     def _account_status_error(self, user: User) -> ServiceResult[SessionData] | None:
         """Return a failure result if the account may not access the app."""

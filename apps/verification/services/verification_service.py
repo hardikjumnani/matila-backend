@@ -89,9 +89,20 @@ class VerificationService:
         from apps.colleges.services.college_service import CollegeService
 
         info = CollegeService().launch_info(user)
+        latest = self.get_latest_request(user)
+        # The admin's note for a resubmission request — shown as a banner on the
+        # submit screen. Only surfaced while the user is asked to resubmit; the
+        # terminal reject note rides the bootstrap 403 instead.
+        review_message = ""
+        if (
+            user.verification_status == VerificationStatus.RESUBMISSION_REQUIRED
+            and latest is not None
+        ):
+            review_message = (latest.review_notes or "").strip()
         return {
             "verification_status": user.verification_status,
-            "latest_request": self.get_latest_request(user),
+            "latest_request": latest,
+            "review_message": review_message,
             # Drives the "you're in — launching in ⏳" countdown page.
             "college": info["college"],
             "launched": info["launched"],
@@ -253,6 +264,7 @@ class VerificationService:
             notification_type="verification.approved",
             notification_title="You're verified!",
             notification_body="Your identity verification was approved.",
+            notification_action_type="VERIFICATION_APPROVED",
             audit_action="verification.approved",
         )
 
@@ -273,6 +285,7 @@ class VerificationService:
             notification_type="verification.rejected",
             notification_title="Verification rejected",
             notification_body="Your verification could not be approved.",
+            notification_action_type="VERIFICATION_REJECTED",
             audit_action="verification.rejected",
         )
 
@@ -293,6 +306,7 @@ class VerificationService:
             notification_type="verification.resubmission_required",
             notification_title="Please resubmit your verification",
             notification_body="We need you to resubmit your verification.",
+            notification_action_type="VERIFICATION_RESUBMISSION_REQUIRED",
             audit_action="verification.resubmission_required",
         )
 
@@ -307,6 +321,7 @@ class VerificationService:
         notification_type: str,
         notification_title: str,
         notification_body: str,
+        notification_action_type: str,
         audit_action: str,
     ) -> ServiceResult[VerificationRequest]:
         with transaction.atomic():
@@ -371,11 +386,16 @@ class VerificationService:
                 )
             else:
                 body = "You're verified! You can start matching now."
+        elif notes.strip():
+            # Reject / resubmission: surface the admin's note to the user, falling
+            # back to the generic copy when no note was given.
+            body = notes.strip()
         self._notifications.create_notification(
             user=user,
             type=notification_type,
             title=notification_title,
             body=body,
+            action_type=notification_action_type,
         )
         logger.info("Verification request %s -> %s", request.id, new_status)
         return ServiceResult.ok(request)

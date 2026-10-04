@@ -55,6 +55,25 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
         return resolve_media_url(obj.gesture_selfie_image_url)
 
 
+class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
+    """Detail view: adds the applicant's name + profile photo so the admin can
+    judge identity (reject for a bad name/DP vs. resubmit for a bad document).
+    Detail-only — the queue serializer stays lean (no per-item photo SAS)."""
+
+    full_name = serializers.CharField(source="user.full_name", read_only=True)
+    profile_photo_url = serializers.SerializerMethodField()
+
+    class Meta(AdminVerificationRequestSerializer.Meta):
+        fields = AdminVerificationRequestSerializer.Meta.fields + [
+            "full_name",
+            "profile_photo_url",
+        ]
+        read_only_fields = fields
+
+    def get_profile_photo_url(self, obj: VerificationRequest) -> str:
+        return resolve_media_url(obj.user.profile_photo_url)
+
+
 class ReviewActionSerializer(serializers.Serializer):
     """Optional reviewer notes for approve/reject/resubmission."""
 

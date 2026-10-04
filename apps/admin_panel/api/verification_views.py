@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from apps.admin_panel.api.base import AdminAPIView
 from apps.admin_panel.api.serializers import (
+    AdminVerificationDetailSerializer,
     AdminVerificationRequestSerializer,
     ReviewActionSerializer,
 )
@@ -41,14 +42,18 @@ class AdminVerificationListView(ListAPIView):
 class AdminVerificationDetailView(AdminAPIView):
     """GET /admin/verifications/{id}."""
 
-    @extend_schema(responses=AdminVerificationRequestSerializer)
+    @extend_schema(responses=AdminVerificationDetailSerializer)
     def get(self, request: Request, request_id: str) -> Response:
-        obj = VerificationRequest.objects.filter(id=request_id).first()
+        obj = (
+            VerificationRequest.objects.select_related("user")
+            .filter(id=request_id)
+            .first()
+        )
         if obj is None:
             return envelope_error(
                 "RESOURCE_NOT_FOUND", "Verification request not found.", 404
             )
-        return Response(AdminVerificationRequestSerializer(obj).data)
+        return Response(AdminVerificationDetailSerializer(obj).data)
 
 
 class _AdminVerificationActionView(AdminAPIView):

@@ -81,6 +81,46 @@ class BootstrapSessionTests(TestCase):
         result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
         self.assertEqual(result.error_code, "ACCOUNT_BANNED")
 
+    def test_rejected_user_is_denied_at_bootstrap(self) -> None:
+        # Rejection is terminal — bootstrap 403s with the admin's note.
+        user = User.objects.create(
+            firebase_uid=self.uid,
+            college_email=self.email,
+            verification_status=VerificationStatus.REJECTED,
+        )
+        VerificationRequest.objects.create(
+            user=user,
+            attempt_number=1,
+            status=VerificationStatus.REJECTED,
+            review_notes="Your name looks fake.",
+            submitted_at=timezone.now(),
+        )
+        result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
+        self.assertTrue(result.failed)
+        self.assertEqual(result.error_code, "VERIFICATION_REJECTED")
+        self.assertEqual(result.error_message, "Your name looks fake.")
+
+    def test_rejected_without_note_uses_generic_message(self) -> None:
+        User.objects.create(
+            firebase_uid=self.uid,
+            college_email=self.email,
+            verification_status=VerificationStatus.REJECTED,
+        )
+        result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
+        self.assertEqual(result.error_code, "VERIFICATION_REJECTED")
+        self.assertTrue(result.error_message)
+
+    def test_resubmission_user_bootstraps_to_submit(self) -> None:
+        User.objects.create(
+            firebase_uid=self.uid,
+            college_email=self.email,
+            onboarding_completed_at=timezone.now(),
+            verification_status=VerificationStatus.RESUBMISSION_REQUIRED,
+        )
+        result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
+        self.assertTrue(result.success)
+        self.assertEqual(result.data.next_action, NextAction.SUBMIT_VERIFICATION)
+
 
 class NextActionTests(TestCase):
     def setUp(self) -> None:

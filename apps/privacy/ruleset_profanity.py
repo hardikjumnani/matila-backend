@@ -19,13 +19,14 @@ below exist only so the pipeline is functional and testable.
 
 from __future__ import annotations
 
-RULESET_VERSION = "2026.10.10-v1"
+RULESET_VERSION = "2026.10.10-v1.1"
 
 # --- Masking config (sparse partial; keeps the word readable) ---------------
 MASK_CHAR = "*"
 MASK_STRIDE = 3   # mask every Nth interior character
 MASK_START = 2    # first interior index to consider masking
 MIN_MASK_LEN = 4  # words shorter than this are never masked
+MIN_PHRASE_WORDS = 2  # phrase entries shorter than this are ignored
 
 # --- T0: casual / mild — ALLOWED, never masked ------------------------------
 T0_CASUAL = [
@@ -57,6 +58,26 @@ T2_SLUR = [
     #   access-controlled dataset during review (intentionally not listed here).
 ]
 
+# --- T1 phrases: harsh multi-word — MASKED (sparse, across the span) ---------
+# Stored normalised: lowercase, single-spaced, no punctuation. The matcher is
+# stretch/leet-tolerant per word and separator-tolerant between words.
+T1_PHRASES = [
+    "son of a bitch", "son of a whore",
+    "piece of shit", "piece of garbage",
+    "fuck you", "fuck off", "fuck you too",
+    "go fuck yourself", "go to hell", "shut the fuck up",
+    "suck my dick", "eat shit", "eat a dick", "kiss my ass",
+    # Hinglish (romanised) — family/sexual-targeted.
+    "teri maa ki", "teri maa ka", "teri maa ki chut", "maa ki chut",
+    "behen ke laude", "bhen ke lode", "teri behen ki", "maa chuda",
+    "teri maa ko",
+]
+
+# --- T2 phrases: slur/hate multi-word — MASKED + FLAGGED ---------------------
+# Seeded from the curated, access-controlled dataset during review (caste /
+# communal / racial / homophobic phrases). Intentionally empty here.
+T2_PHRASES: list[str] = []
+
 # --- Whitelist: clean words to never flag (Scunthorpe guard) -----------------
 WHITELIST = [
     "class", "classic", "classes", "assassin", "assassinate", "assess",
@@ -78,8 +99,10 @@ def export() -> dict:
             "stride": MASK_STRIDE,
             "start": MASK_START,
             "min_len": MIN_MASK_LEN,
+            "min_phrase_words": MIN_PHRASE_WORDS,
         },
         "t0_casual": T0_CASUAL,
         "t1_harsh": T1_HARSH,
+        "t1_phrases": T1_PHRASES,  # T2 phrases/words omitted (server-authoritative)
         "whitelist": WHITELIST,
     }

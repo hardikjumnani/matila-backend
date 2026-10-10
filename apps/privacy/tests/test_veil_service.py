@@ -83,6 +83,13 @@ class VeilServiceTests(TestCase):
         )
         self.assertTrue(d2.blocked)
 
+    def test_cross_message_text_steer_blocks_completer(self):
+        svc = self._svc()
+        d1 = svc.inspect_text(chat=self.chat, sender=self.user, text="add me")
+        self.assertFalse(d1.blocked)
+        d2 = svc.inspect_text(chat=self.chat, sender=self.user, text="on insta")
+        self.assertTrue(d2.blocked)
+
     def test_shadow_mode_allows_but_records(self):
         svc = self._svc(mode=VeilMode.SHADOW.value)
         d = svc.inspect_text(chat=self.chat, sender=self.user, text="9876543210")

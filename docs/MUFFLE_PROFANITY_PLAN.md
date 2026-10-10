@@ -162,3 +162,81 @@ server is always the source of truth.
 - `ProfanityEvent` model (+ reuse `LeakStrike`).
 - Red-team corpus incl. **Scunthorpe cases** (`class`, `assassin`, `cockpit`, names).
 - `docs/MUFFLE_SPEC.md` freezing the tier→action contract + masking algorithm.
+
+---
+
+## 9. Phrase detection (v1.1) — detailed design
+
+**Why:** v1 is word-by-word, so multi-word profanity (`son of a bitch`, `piece of
+shit`, Hinglish `teri maa ki ...`) slips through — each word is either clean or
+sits in T0. We add **tiered multi-word phrase matching** with the SAME sparse mask,
+applied **across the whole phrase span** (per owner: `son of a bitch` → `so* o* a
+bi*ch`).
+
+### 9.1 Ruleset additions (`ruleset_profanity.py`)
+- New tiered **phrase** lists (only the actioned tiers need listing; anything not
+  listed is allowed):
+  - `T1_PHRASES` — harsh, masked. e.g. `son of a bitch`, `piece of shit`,
+    `fuck you`, `fuck off`, `go fuck yourself`, `shut the fuck up`, `suck my dick`,
+    `eat shit`; Hinglish `teri maa ki`, `teri maa ka`, `maa ki`, `behen ke laude`,
+    `teri behen ki`.
+  - `T2_PHRASES` — slur/hate phrases, masked **and** flagged (seeded from the
+    curated list during review; not enumerated here).
+- Each phrase stored **normalised**: lowercase, single-spaced, no punctuation.
+- Reuse existing `MASK_CHAR` / `MASK_STRIDE` / `MASK_START`. Add `MIN_PHRASE_WORDS = 2`.
+- **Bump `RULESET_VERSION`.** Add `t1_phrases` to `export()`; **omit `t2_phrases`**
+  from the client export (same policy as T2 words — masking is server-authoritative).
+- **Tier boundary is a values call** (e.g. "son of a bitch" could be T0/allowed).
+  Ship a conservative default; owner tunes.
+
+### 9.2 Matching algorithm (`muffle_guard.py`)
+Token-sequence matching over the existing word tokens — this gives clean word
+boundaries **and** exact original-offset spans for masking, and naturally tolerates
+separators between words (`fuck, you` still matches `fuck you`).
+
+1. Tokenise once: `tokens = [(folded, start, end)]` from `_WORD_RE.finditer(text)`
+   (`folded` = NFKC + zero-width strip + lower + leet, as today).
+2. Precompile each phrase to a **list of per-word stretch-regexes** (`f+u+c+k+ …`,
+   so `fuuuck you` / `f1sh` leet still match), tagged with tier, **bucketed by first
+   word** for fast lookup.
+3. Single left-to-right pass with **longest-/most-severe-match-first**:
+   ```
+   i = 0
+   while i < len(tokens):
+       hit = best phrase starting at token i   # prefer T2 > T1, then longer
+       if hit:
+           span = (tokens[i].start, tokens[i+len-1].end)
+           mask text[span] with sparse_mask(); record MuffleHit(kind=phrase)
+           i += len(hit)                       # consume the phrase's tokens
+       else:
+           classify tokens[i] as a single word (existing logic); i += 1
+   ```
+   Running **phrases first and consuming their tokens** prevents double-processing
+   (a word inside a matched phrase isn't re-masked).
+4. **Masking across the span:** reuse `sparse_mask()` on the original phrase
+   substring. It masks every Nth *alphabetic* char and skips the first/last and all
+   non-letters, so interword spaces/commas are preserved:
+   `son of a bitch` → `so* o* a bi*ch`.
+
+### 9.3 Edge cases / FP control
+- **Idiomatic-but-mild phrases** stay safe by simply not being in `T1_PHRASES`
+  (tiering is the control, same as words).
+- **Overlap** (phrase contains a T0/T1 word): phrase wins; its tokens are consumed.
+- **Punctuation between words** handled (token list ignores separators; the masked
+  span still covers them).
+- **Performance:** first-word bucketing → O(tokens × phrases-in-bucket × phrase-len);
+  negligible for chat-length text.
+- **Known gap (unchanged):** profanity broken *inside* a word by separators
+  (`f.u.c.k`) still isn't matched; that's a separate normalisation item.
+
+### 9.4 Changes required
+- `ruleset_profanity.py`: add `T1_PHRASES` / `T2_PHRASES` + `MIN_PHRASE_WORDS`,
+  bump version, extend `export()`.
+- `muffle_guard.py`: phrase compilation + the phrase-first pass; `MuffleHit` gains a
+  `kind` (`word`|`phrase`). `MuffleResult`/`MuffleService`/`ProfanityEvent` and the
+  `send_text` wiring are **unchanged** (phrases flow through the same path; `words`
+  on the event will list matched phrases too).
+- Tests: phrase masking + exact sparse output, longest/most-severe precedence,
+  phrase-first vs single-word overlap, leet-in-phrase, Hinglish phrase, and FP
+  (an allowed idiomatic phrase left untouched).
+- No model, migration, config, or FE-contract changes.

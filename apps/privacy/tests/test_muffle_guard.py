@@ -78,6 +78,46 @@ class MaskTests(SimpleTestCase):
         self._untouched("she is from Scunthorpe")
 
 
+class PhraseTests(SimpleTestCase):
+    def setUp(self) -> None:
+        self.g = MuffleGuard()
+
+    def test_son_of_a_bitch_sparse_masked(self):
+        r = self.g.scan("you are a son of a bitch")
+        self.assertTrue(r.changed)
+        self.assertIn("so* o* a bi*ch", r.masked_text)
+        self.assertEqual(r.hits[0].kind, "phrase")
+        self.assertEqual(r.top_tier, ProfanityTier.T1_HARSH.value)
+
+    def test_fuck_you_phrase_masked_even_though_fuck_is_casual(self):
+        # "fuck" alone is T0, but "fuck you" is a targeted phrase -> masked.
+        r = self.g.scan("fuck you")
+        self.assertTrue(r.changed)
+        self.assertIn("*", r.masked_text)
+
+    def test_phrase_tolerates_separator(self):
+        r = self.g.scan("fuck, you")
+        self.assertTrue(r.changed)
+
+    def test_phrase_leet_and_stretch(self):
+        self.assertTrue(self.g.scan("fuuuck you").changed)       # stretched
+        self.assertTrue(self.g.scan("piece of sh1t").changed)    # leet 1->i
+
+    def test_hinglish_phrase(self):
+        self.assertTrue(self.g.scan("abe teri maa ki").changed)
+
+    def test_allowed_idiom_untouched(self):
+        # Not in any phrase list -> left alone.
+        r = self.g.scan("he is a son of a gun")
+        self.assertFalse(r.changed)
+        self.assertEqual(r.masked_text, "he is a son of a gun")
+
+    def test_preserves_surrounding_text(self):
+        r = self.g.scan("ok son of a bitch bye")
+        self.assertTrue(r.masked_text.startswith("ok "))
+        self.assertTrue(r.masked_text.endswith(" bye"))
+
+
 class SparseMaskTests(SimpleTestCase):
     def test_example_from_spec(self):
         self.assertEqual(sparse_mask("motherfucker"), "mo*he*fu*ker")

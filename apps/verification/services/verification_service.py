@@ -381,8 +381,8 @@ class VerificationService:
             college = info["college"]
             if college and not info["launched"] and college.get("launch_date"):
                 body = (
-                    f"You're verified! Matila launches at {college['name']} soon — "
-                    "watch the countdown."
+                    f"You're verified! Matila launches at {college['name']} soon. "
+                    "Watch the countdown."
                 )
             else:
                 body = "You're verified! You can start matching now."

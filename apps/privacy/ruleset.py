@@ -74,27 +74,26 @@ STEER_VERBS: list[str] = [
 # --- Block message tones (graduate by offence count) ------------------------
 # {0} may be filled with a short, category-specific clause.
 TONES: dict[str, list[str]] = {
-    # offence 1 — gentle
+    # offence 1: gentle
     "gentle": [
-        "Heads up — Matila keeps you both anonymous for now, so contact details, "
+        "Heads up. Matila keeps you both anonymous for now, so contact details, "
         "socials and numbers can't be shared yet. You'll be able to once you both "
         "choose to reveal. \U0001F49B",
     ],
-    # offence 2 — firmer
+    # offence 2: firmer
     "firm": [
-        "Let's keep it inside Matila — numbers, emails, UPI and social handles "
-        "can't be shared during the anonymous chat. It's what keeps this safe for "
-        "everyone.",
+        "Let's keep it inside Matila. Personal details can't be shared during the "
+        "anonymous chat. It's what keeps this safe for everyone.",
     ],
-    # offence 3+ — serious but caring
+    # offence 3+: serious but caring
     "serious": [
         "We've had to block this again. Repeatedly trying to share or ask for "
-        "personal contact details can get your account limited — not because we "
+        "personal contact details can get your account limited. It's not because we "
         "want to, but to keep everyone safe. Please keep the conversation here.",
     ],
     # category nudge for solicitation (asking for the other person's details)
     "ask": [
-        "You can't ask for their contact or socials yet — Matila stays anonymous "
+        "You can't ask for their contact or socials yet. Matila stays anonymous "
         "until you both choose to reveal. \U0001F49B",
     ],
 }

@@ -198,7 +198,7 @@ def looks_like_phone(digits: str) -> bool:
 class LeakGuard:
     """Deterministic contact/PII leakage scanner."""
 
-    def scan(self, text: str, *, prior_digits: str = "") -> Verdict:
+    def scan(self, text: str, *, prior_digits: str = "", prior_text: str = "") -> Verdict:
         raw = text or ""
         folded = _fold(raw)
         leet = folded.translate(_LEET)
@@ -237,6 +237,18 @@ class LeakGuard:
         # --- Keyword-driven: solicitation / steering / platform+handle ------
         hits.extend(self._keyword_scan(folded, leet))
 
+        # --- Cross-message window: catch a multi-word steer/solicitation split
+        # across messages (e.g. "add me" then "on insta"). Only fire on the
+        # message that COMPLETES the leak: a high-confidence keyword category that
+        # the joined window matches but neither this message alone nor the prior
+        # buffer alone did. Mirrors the digit reassembler's dedupe.
+        if prior_text:
+            window_high = self._high_kw_categories(prior_text + " " + raw)
+            prior_high = self._high_kw_categories(prior_text)
+            current_high = self._high_kw_categories(raw)
+            for category in window_high - prior_high - current_high:
+                hits.append(Hit(category, _HIGH, "window", "<cross-message>"))
+
         action = (
             LeakAction.BLOCK.value
             if any(h.severity in (_HIGH, LeakSeverity.MEDIUM.value) for h in hits)
@@ -245,6 +257,15 @@ class LeakGuard:
         return Verdict(
             action=action, hits=tuple(hits), digits=digits, combined_digits=combined
         )
+
+    def _high_kw_categories(self, raw_text: str) -> set[str]:
+        """High-severity keyword categories present in a (possibly multi-message)
+        chunk of text. Used for cross-message dedupe."""
+        folded = _fold(raw_text or "")
+        leet = folded.translate(_LEET)
+        return {
+            h.category for h in self._keyword_scan(folded, leet) if h.severity == _HIGH
+        }
 
     def _keyword_scan(self, folded: str, leet: str) -> list[Hit]:
         hits: list[Hit] = []

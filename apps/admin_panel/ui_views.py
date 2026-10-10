@@ -122,7 +122,7 @@ async function api(path, method="GET", body=null){
   const data = await res.json().catch(()=>({}));
   if(!res.ok){
     const code = (data.error && data.error.code) || res.status;
-    throw new Error(code + (data.error && data.error.message ? " — "+data.error.message : ""));
+    throw new Error(code + (data.error && data.error.message ? ": "+data.error.message : ""));
   }
   return data.data !== undefined ? data.data : data;
 }
@@ -142,18 +142,16 @@ async function loadList(){
           <span class="pill ${r.status}">${r.status}</span>
         </div>
         <div class="muted" style="font-size:12px">user ${String(r.user_id).slice(0,8)}… ·
-          ${r.submitted_at ? new Date(r.submitted_at).toLocaleString() : "—"}</div>
+          ${r.submitted_at ? new Date(r.submitted_at).toLocaleString() : "-"}</div>
       </div>`).join("");
   } catch(e){ toast(e.message, false); }
 }
 async function openDetail(id){
-  // Immediate feedback before the round-trip: highlight the card + show loading.
-  document.querySelectorAll(".card").forEach(c=>c.classList.remove("active"));
-  const card=document.getElementById("c_"+id); if(card) card.classList.add("active");
-  document.getElementById("detail").innerHTML='<div class="empty">Loading…</div>';
   try {
     const r = await api("/admin/verifications/"+id);
     CURRENT = r;
+    document.querySelectorAll(".card").forEach(c=>c.classList.remove("active"));
+    const c=document.getElementById("c_"+id); if(c) c.classList.add("active");
     const canAct = r.status==="PENDING" || r.status==="RESUBMISSION_REQUIRED";
     document.getElementById("detail").innerHTML = `
       <div class="row" style="justify-content:space-between">
@@ -163,16 +161,16 @@ async function openDetail(id){
         <figure><figcaption>College ID</figcaption>
           <img src="${r.college_id_image_url||''}" alt="college id"
                onerror="this.style.opacity=.3;this.alt='image unavailable'"/></figure>
-        <figure><figcaption>Gesture selfie — <code>${r.gesture_type||'?'}</code></figcaption>
+        <figure><figcaption>Gesture selfie: <code>${r.gesture_type||'?'}</code></figcaption>
           <img src="${r.gesture_selfie_image_url||''}" alt="selfie"
                onerror="this.style.opacity=.3;this.alt='image unavailable'"/></figure>
       </div>
       <div class="kv">
         <div>User</div><div>${r.user_id}</div>
         <div>Attempt</div><div>#${r.attempt_number}</div>
-        <div>Submitted</div><div>${r.submitted_at? new Date(r.submitted_at).toLocaleString():"—"}</div>
-        <div>Reviewed</div><div>${r.reviewed_at? new Date(r.reviewed_at).toLocaleString():"—"}</div>
-        <div>Prev notes</div><div>${r.review_notes||"—"}</div>
+        <div>Submitted</div><div>${r.submitted_at? new Date(r.submitted_at).toLocaleString():"-"}</div>
+        <div>Reviewed</div><div>${r.reviewed_at? new Date(r.reviewed_at).toLocaleString():"-"}</div>
+        <div>Prev notes</div><div>${r.review_notes||"-"}</div>
       </div>
       <p class="muted" style="margin:12px 0 4px">Reviewer notes (optional)</p>
       <textarea id="notes" placeholder="reason / notes for the applicant"></textarea>
@@ -187,15 +185,11 @@ async function openDetail(id){
 }
 async function act(id, action){
   const notes=(document.getElementById("notes")||{}).value||"";
-  // Disable the action row immediately so clicks feel instant and can't double-fire.
-  const btns=[...document.querySelectorAll(".actions button")];
-  btns.forEach(b=>{ b.disabled=true; });
-  toast(action.replace("-"," ")+"…");
   try {
     await api("/admin/verifications/"+id+"/"+action, "POST", {notes});
     toast(action.replace("-"," ")+" ✓");
     await loadList(); await openDetail(id);
-  } catch(e){ btns.forEach(b=>{ b.disabled=false; }); toast(e.message, false); }
+  } catch(e){ toast(e.message, false); }
 }
 // --- Colleges (launch-date management) ---
 function toLocalInput(iso){

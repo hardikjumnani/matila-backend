@@ -222,6 +222,72 @@ from attempt #1; a flagged message is allowed whole or blocked whole.
 - **Escalation does not auto-ban.** It flags for T&S (audit + notification +
   `LeakEvent(action=ESCALATE)`); account actions remain an admin decision.
 
+## 6b. Cross-message text leaks (v1.1 plan)
+
+**Gap:** the Number Reassembler already reconstructs a phone number split across
+messages (via a rolling per-sender digit window), but the keyword and phrase
+detectors (steering, meet-up, solicitation, verbose email, platform plus handle)
+run on a single message only. So a user can split an off-app steer across messages,
+for example "meet me" then "at the canteen", or "add me" then "on insta", and evade
+them.
+
+**Reuse the mechanism we already built.** VeilService keeps a per (chat, sender)
+rolling window in cache and passes it to the scanner. We extend that from digits only
+to text.
+
+### Rolling text window
+- Keep a per (chat, sender) buffer of recent normalised text in cache, keyed
+  veil:text:{chat}:{sender}, with a short TTL (reuse the digit window seconds, for
+  example 120s). Append each message, trim to the last N messages or L characters
+  (for example last 3 messages / 200 chars).
+
+### Windowed scan
+- Build window_text = prior_buffer + " " + current_message and run the multi-word
+  intent detectors (steering, meet-up, solicitation, verbose email, platform plus
+  handle) over it. Keep the single-token detectors (full phone, email, UPI, URL,
+  at-handle) per message as they are; they rarely split usefully and running them on
+  the window would only add false positives.
+- Primary join is space-joined (phrase reconstruction across message boundaries).
+  Optionally also try a compact (no-space) join to catch a single word split mid
+  token ("what" then "sapp"), guarded tightly because concatenation raises false
+  positives.
+
+### Fire only on the completing message (dedupe)
+- Block only when a match appears in the combined window that was NOT present in the
+  prior buffer alone. This is the same rule the digit reassembler uses: it blocks
+  exactly the message that completes the leak, once, not the innocent partials before
+  it (which were already delivered and were harmless alone).
+- Reset the window after a block so one block does not cascade into the next message.
+
+### Action and tone
+- Same as today: BLOCK the completing message with the graduated tone. We cannot
+  un-send the earlier partials, but blocking the completing message still withholds
+  the actionable piece (the place, the handle, the rest of the number).
+
+### False-positive control
+- Short TTL window, high-confidence multi-word patterns only, the span-the-current
+  requirement, window reset after a block, and shadow-mode tuning from logged events.
+  Expect a higher FP rate than single-message, so launch this in shadow first.
+
+### Config
+- VEIL_TEXT_WINDOW_SECONDS and a size cap (messages or characters), reusing
+  VEIL_ENABLED and the shadow or enforce mode.
+
+### Honest limit
+- The window is time and size bounded, so a leak dripped very slowly (messages far
+  apart) still evades. That is acceptable: it raises the effort bar sharply, which is
+  the goal, not a perfect wall. Same bound as the digit reassembler.
+
+### Changes required
+- VeilService: add a text window alongside the digit window and pass prior_text to
+  the scanner.
+- LeakGuard: a windowed scan path that runs the multi-word detectors over the joined
+  window and dedupes against the prior buffer (mirroring the digit reassembler).
+- Tests: cross-message meet-up, "add me" then "on insta", verbose email split across
+  messages, plus false-positive cases (two innocent messages that must not combine
+  into a block).
+- No model, migration, config-shape, or FE-contract changes.
+
 ## 7. Artifacts
 
 - `apps/privacy/` scanner + `ruleset/v1.json`.

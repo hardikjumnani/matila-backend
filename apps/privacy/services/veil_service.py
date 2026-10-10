@@ -25,6 +25,8 @@ from apps.privacy.constants import (
     DEFAULT_WINDOW_SECONDS,
     DIGIT_WINDOW_CACHE_PREFIX,
     MAX_ACCUMULATED_DIGITS,
+    MAX_WINDOW_CHARS,
+    TEXT_WINDOW_CACHE_PREFIX,
 )
 from apps.privacy.enums import LeakAction, LeakCategory, VeilMode
 from apps.privacy.models import LeakEvent, LeakStrike
@@ -119,12 +121,19 @@ class VeilService:
             return VeilDecision(blocked=False)
 
     def _inspect(self, chat, sender, text: str) -> VeilDecision:
-        key = f"{DIGIT_WINDOW_CACHE_PREFIX}{chat.id}:{sender.id}"
-        prior = cache.get(key, "")
-        verdict = self._guard.scan(text, prior_digits=prior)
-        # Keep only the tail of the accumulated digits (one phone's worth).
+        dkey = f"{DIGIT_WINDOW_CACHE_PREFIX}{chat.id}:{sender.id}"
+        tkey = f"{TEXT_WINDOW_CACHE_PREFIX}{chat.id}:{sender.id}"
+        prior_digits = cache.get(dkey, "")
+        prior_text = cache.get(tkey, "")
+        verdict = self._guard.scan(
+            text, prior_digits=prior_digits, prior_text=prior_text
+        )
+        window_seconds = self._window_seconds()
+        # Keep only the tail of the accumulated digits (one phone's worth) and a
+        # short rolling text window for cross-message keyword/phrase leaks.
+        cache.set(dkey, verdict.combined_digits[-MAX_ACCUMULATED_DIGITS:], window_seconds)
         cache.set(
-            key, verdict.combined_digits[-MAX_ACCUMULATED_DIGITS:], self._window_seconds()
+            tkey, (prior_text + " " + (text or "")).strip()[-MAX_WINDOW_CHARS:], window_seconds
         )
 
         if not verdict.blocked:
@@ -146,8 +155,9 @@ class VeilService:
         if action == LeakAction.ESCALATE.value:
             self._escalate(sender, strike.count, verdict)
 
-        # Reset the window so one block doesn't cascade into the next message.
-        cache.delete(key)
+        # Reset the windows so one block doesn't cascade into the next message.
+        cache.delete(dkey)
+        cache.delete(tkey)
         return VeilDecision(
             blocked=True,
             user_message=self._message_for(verdict, strike.count),

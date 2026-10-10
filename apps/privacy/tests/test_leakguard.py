@@ -145,6 +145,30 @@ class ScanAllowTests(SimpleTestCase):
         self._allowed("that movie from 2019 was great")
 
 
+class CrossMessageTextTests(SimpleTestCase):
+    """A steer/solicitation split across messages (via prior_text)."""
+
+    def setUp(self) -> None:
+        self.g = LeakGuard()
+
+    def test_add_me_on_insta_split(self):
+        # Neither half trips alone; the joined window does -> block the completer.
+        self.assertFalse(self.g.scan("add me").blocked)
+        self.assertFalse(self.g.scan("on insta").blocked)
+        v = self.g.scan("on insta", prior_text="add me")
+        self.assertTrue(v.blocked)
+        self.assertEqual(v.top_category, LeakCategory.STEERING.value)
+
+    def test_lets_meet_split(self):
+        self.assertFalse(self.g.scan("meet at the lib").blocked)
+        self.assertTrue(self.g.scan("meet at the lib", prior_text="lets").blocked)
+
+    def test_innocent_pair_not_blocked(self):
+        # "i love my" + "instagram feed" must not combine into a block.
+        v = self.g.scan("instagram feed", prior_text="i love my")
+        self.assertFalse(v.blocked)
+
+
 class HelperTests(SimpleTestCase):
     def test_extract_digits_mixed(self):
         self.assertEqual(extract_digits("two cats 3 dogs nine"), "239")

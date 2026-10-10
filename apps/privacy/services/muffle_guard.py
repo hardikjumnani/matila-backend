@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import namedtuple
 from dataclasses import dataclass
 
 from apps.privacy import ruleset_profanity as rp
@@ -62,6 +63,35 @@ _BUCKETS = [
 ]
 _WHITELIST = {w.lower() for w in rp.WHITELIST}
 
+# --- Phrase compilation ------------------------------------------------------
+# Each phrase -> (tier, [per-word stretch regexes], word_count, canonical phrase),
+# bucketed by the phrase's first character. Buckets are sorted most-severe- and
+# longest-first so the first match at a position is the best match.
+_Phrase = namedtuple("_Phrase", "tier regexes nwords text")
+
+
+def _build_phrase_buckets():
+    items: list[_Phrase] = []
+    for tier, phrases in ((_T2, rp.T2_PHRASES), (_T1, rp.T1_PHRASES)):
+        for ph in phrases:
+            words = ph.lower().split()
+            if len(words) < rp.MIN_PHRASE_WORDS:
+                continue
+            items.append(
+                _Phrase(tier, [_stretch_pattern(w) for w in words], len(words), ph.lower())
+            )
+    buckets: dict[str, list[_Phrase]] = {}
+    for it in items:
+        buckets.setdefault(it.text[0], []).append(it)
+    for lst in buckets.values():
+        lst.sort(key=lambda p: (p.tier == _T2, p.nwords), reverse=True)
+    return buckets
+
+
+_PHRASE_BUCKETS = _build_phrase_buckets()
+
+_Tok = namedtuple("_Tok", "folded start end")
+
 
 @dataclass(frozen=True, slots=True)
 class MuffleHit:
@@ -69,6 +99,7 @@ class MuffleHit:
     tier: str
     original: str
     masked: str
+    kind: str = "word"  # "word" | "phrase"
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,8 +124,7 @@ class MuffleResult:
         return sorted({h.word for h in self.hits})
 
 
-def _classify(token: str) -> tuple[str | None, str | None]:
-    folded = _fold_token(token)
+def _classify_folded(folded: str) -> tuple[str | None, str | None]:
     if not folded or folded in _WHITELIST:
         return (None, None)
     first = folded[0]
@@ -103,6 +133,19 @@ def _classify(token: str) -> tuple[str | None, str | None]:
             if rx.fullmatch(folded):
                 return (tier, word)
     return (None, None)
+
+
+def _match_phrase(tokens, i: int):
+    """Longest-/most-severe phrase starting at token i, or None."""
+    folded = tokens[i].folded
+    if not folded:
+        return None
+    for ph in _PHRASE_BUCKETS.get(folded[0], ()):
+        if i + ph.nwords > len(tokens):
+            continue
+        if all(ph.regexes[j].fullmatch(tokens[i + j].folded) for j in range(ph.nwords)):
+            return ph
+    return None
 
 
 def sparse_mask(token: str) -> str:
@@ -123,17 +166,38 @@ class MuffleGuard:
 
     def scan(self, text: str) -> MuffleResult:
         text = text or ""
+        tokens = [
+            _Tok(_fold_token(m.group(0)), m.start(), m.end())
+            for m in _WORD_RE.finditer(text)
+        ]
         hits: list[MuffleHit] = []
         out: list[str] = []
         last = 0
-        for m in _WORD_RE.finditer(text):
-            tier, word = _classify(m.group(0))
-            if tier in (_T1, _T2):
-                original = m.group(0)
+        i = 0
+        while i < len(tokens):
+            # Phrases first (longest / most-severe), consuming their tokens so a
+            # word inside a matched phrase is not re-masked.
+            ph = _match_phrase(tokens, i)
+            if ph is not None:
+                start, end = tokens[i].start, tokens[i + ph.nwords - 1].end
+                original = text[start:end]
                 masked = sparse_mask(original)
-                hits.append(MuffleHit(word, tier, original, masked))
-                out.append(text[last:m.start()])
+                hits.append(MuffleHit(ph.text, ph.tier, original, masked, "phrase"))
+                out.append(text[last:start])
                 out.append(masked)
-                last = m.end()
+                last = end
+                i += ph.nwords
+                continue
+
+            tier, word = _classify_folded(tokens[i].folded)
+            if tier in (_T1, _T2):
+                start, end = tokens[i].start, tokens[i].end
+                original = text[start:end]
+                masked = sparse_mask(original)
+                hits.append(MuffleHit(word, tier, original, masked, "word"))
+                out.append(text[last:start])
+                out.append(masked)
+                last = end
+            i += 1
         out.append(text[last:])
         return MuffleResult(masked_text="".join(out), hits=tuple(hits))

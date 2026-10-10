@@ -27,6 +27,14 @@ from apps.admin_panel.api.report_views import (
     AdminReportListView,
     AdminReportResolveView,
 )
+from apps.admin_panel.api.safety_views import (
+    AdminLeakEventListView,
+    AdminOffenderListView,
+    AdminProfanityEventListView,
+    AdminResetStrikesView,
+    AdminSafetyStatsView,
+    AdminUserSafetyDetailView,
+)
 from apps.admin_panel.api.verification_views import (
     AdminVerificationApproveView,
     AdminVerificationDetailView,
@@ -138,5 +146,32 @@ urlpatterns = [
         "admin/dashboard/stats",
         AdminDashboardStatsView.as_view(),
         name="dashboard-stats",
+    ),
+    # Trust & safety (Veil / Muffle review)
+    path(
+        "admin/safety/leak-events",
+        AdminLeakEventListView.as_view(),
+        name="safety-leak-events",
+    ),
+    path(
+        "admin/safety/profanity-events",
+        AdminProfanityEventListView.as_view(),
+        name="safety-profanity-events",
+    ),
+    path(
+        "admin/safety/offenders",
+        AdminOffenderListView.as_view(),
+        name="safety-offenders",
+    ),
+    path("admin/safety/stats", AdminSafetyStatsView.as_view(), name="safety-stats"),
+    path(
+        "admin/safety/users/<uuid:user_id>",
+        AdminUserSafetyDetailView.as_view(),
+        name="safety-user-detail",
+    ),
+    path(
+        "admin/safety/users/<uuid:user_id>/reset-strikes",
+        AdminResetStrikesView.as_view(),
+        name="safety-reset-strikes",
     ),
 ]

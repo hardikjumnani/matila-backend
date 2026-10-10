@@ -16,6 +16,7 @@ from apps.common.media import resolve_media_url
 from apps.configuration.models import AppConfig, FeatureFlag
 from apps.messaging.enums import MediaStatus
 from apps.messaging.models import Message
+from apps.privacy.models import LeakEvent, ProfanityEvent
 from apps.reports.enums import ResolutionAction
 from apps.reports.models import Report
 from apps.users.models import User
@@ -227,6 +228,63 @@ class AdminCollegeUpdateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("No editable fields were provided.")
         return attrs
+
+
+class AdminLeakEventSerializer(serializers.ModelSerializer):
+    """Veil leak event with applicant context, for the T&S view. Includes the raw
+    leaked text (admin-only) per the temporary raw-logging policy."""
+
+    user_id = serializers.UUIDField(read_only=True)
+    chat_id = serializers.UUIDField(read_only=True, allow_null=True)
+    user_email = serializers.CharField(source="user.college_email", read_only=True)
+    user_name = serializers.CharField(source="user.full_name", read_only=True)
+
+    class Meta:
+        model = LeakEvent
+        fields = [
+            "id",
+            "user_id",
+            "user_email",
+            "user_name",
+            "chat_id",
+            "category",
+            "severity",
+            "action",
+            "mode",
+            "rule_version",
+            "detectors",
+            "matched_span",
+            "raw_message",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class AdminProfanityEventSerializer(serializers.ModelSerializer):
+    """Muffle profanity event with applicant context, for the T&S view."""
+
+    user_id = serializers.UUIDField(read_only=True)
+    chat_id = serializers.UUIDField(read_only=True, allow_null=True)
+    user_email = serializers.CharField(source="user.college_email", read_only=True)
+    user_name = serializers.CharField(source="user.full_name", read_only=True)
+
+    class Meta:
+        model = ProfanityEvent
+        fields = [
+            "id",
+            "user_id",
+            "user_email",
+            "user_name",
+            "chat_id",
+            "tier",
+            "mode",
+            "rule_version",
+            "words",
+            "raw_message",
+            "masked_message",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

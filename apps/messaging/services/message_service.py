@@ -20,6 +20,7 @@ from typing import BinaryIO
 from django.db import transaction
 from django.utils import timezone
 
+from apps.chats.enums import ChatPhase
 from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
 from apps.configuration.constants import FeatureFlagKey
@@ -38,7 +39,13 @@ class MessageService:
     """Message creation, view-once media, and read/delete state."""
 
     def __init__(
-        self, *, chat_service=None, storage_service=None, configuration_service=None
+        self,
+        *,
+        chat_service=None,
+        storage_service=None,
+        configuration_service=None,
+        veil_service=None,
+        muffle_service=None,
     ) -> None:
         if chat_service is None:
             from apps.chats.services.chat_service import ChatService
@@ -54,9 +61,19 @@ class MessageService:
             )
 
             configuration_service = ConfigurationService()
+        if veil_service is None:
+            from apps.privacy.services.veil_service import VeilService
+
+            veil_service = VeilService()
+        if muffle_service is None:
+            from apps.privacy.services.muffle_service import MuffleService
+
+            muffle_service = MuffleService()
         self._chats = chat_service
         self._storage = storage_service
         self._config = configuration_service
+        self._veil = veil_service
+        self._muffle = muffle_service
 
     # -- Queries ------------------------------------------------------------
 
@@ -89,6 +106,20 @@ class MessageService:
                 "MESSAGE_TOO_LONG",
                 f"Message exceeds {MAX_TEXT_MESSAGE_LENGTH} characters.",
             )
+
+        # Veil anti-leakage engine: only while identities are still hidden. After
+        # a legitimate reveal the chat leaves the ANONYMOUS phase and Veil
+        # disengages (sharing contact details is then fine).
+        if chat.current_phase == ChatPhase.ANONYMOUS:
+            decision = self._veil.inspect_text(chat=chat, sender=sender, text=content)
+            if decision.blocked:
+                return ServiceResult.fail("MESSAGE_BLOCKED", decision.user_message)
+
+        # Muffle profanity softener: unlike Veil it never blocks — it rewrites the
+        # text (harsh/targeted words partially masked) and applies in every phase.
+        content = self._muffle.inspect_and_mask(
+            chat=chat, sender=sender, text=content
+        ).text
 
         reply = None
         if reply_to_message_id:

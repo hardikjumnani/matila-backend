@@ -29,6 +29,12 @@ class AppConfigKey:
     MATCHMAKING_TIMEOUT_SECONDS = "matchmaking_timeout_seconds"
     GESTURE_POOL = "gesture_pool"
     CHAT_EXPIRY_WARNING_MINUTES = "chat_expiry_warning_minutes"
+    # Veil (anti-leakage) engine, see docs/VEIL_ENGINE_PLAN.md.
+    VEIL_MODE = "veil_mode"  # "shadow" | "enforce"
+    VEIL_WINDOW_SECONDS = "veil_window_seconds"
+    VEIL_ESCALATE_THRESHOLD = "veil_escalate_threshold"
+    # Muffle (profanity softening) engine, see docs/MUFFLE_PROFANITY_PLAN.md.
+    MUFFLE_MODE = "muffle_mode"  # "shadow" | "mask"
 
 
 class FeatureFlagKey:
@@ -36,6 +42,8 @@ class FeatureFlagKey:
     REVEAL_ENABLED = "reveal_enabled"
     IMAGE_MESSAGES_ENABLED = "image_messages_enabled"
     MAINTENANCE_MODE = "maintenance_mode"
+    VEIL_ENABLED = "veil_enabled"
+    MUFFLE_ENABLED = "muffle_enabled"
 
 
 # Fallback values used when a key has not been seeded in the database.
@@ -55,6 +63,14 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
+    # CHOSEN: Veil anti-leakage engine. Mode starts at "enforce" so the control
+    # is active in dev; production should run "shadow" first to tune (see plan).
+    AppConfigKey.VEIL_MODE: "enforce",
+    AppConfigKey.VEIL_WINDOW_SECONDS: 120,  # cross-message digit-reassembly window.
+    AppConfigKey.VEIL_ESCALATE_THRESHOLD: 5,  # blocks before T&S escalation.
+    # CHOSEN: Muffle profanity softener. "mask" is active in dev; production may
+    # start "shadow" to tune the tier boundary first (see plan).
+    AppConfigKey.MUFFLE_MODE: "mask",
     # CHOSEN: gesture instructions the verification flow can request. gesture_type
     # on a verification request is a free string drawn from this pool.
     AppConfigKey.GESTURE_POOL: [
@@ -86,4 +102,6 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     FeatureFlagKey.REVEAL_ENABLED: True,
     FeatureFlagKey.IMAGE_MESSAGES_ENABLED: True,
     FeatureFlagKey.MAINTENANCE_MODE: False,
+    FeatureFlagKey.VEIL_ENABLED: True,
+    FeatureFlagKey.MUFFLE_ENABLED: True,
 }

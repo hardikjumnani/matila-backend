@@ -76,6 +76,7 @@ LOCAL_APPS = [
     "apps.matchmaking",
     "apps.chats",
     "apps.messaging",
+    "apps.privacy",
     "apps.reveal",
     "apps.payments",
     "apps.reports",

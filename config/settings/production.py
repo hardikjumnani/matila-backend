@@ -27,9 +27,14 @@ from .base import (
 DEBUG = False
 
 # Dev-only shortcuts must never be enabled in production.
-if globals().get("AUTH_DEV_BYPASS") or globals().get("PAYMENTS_DEV_BYPASS"):
+if (
+    globals().get("AUTH_DEV_BYPASS")
+    or globals().get("PAYMENTS_DEV_BYPASS")
+    or globals().get("ENDGAME_PAYMENT_BYPASS")
+):
     raise RuntimeError(
-        "AUTH_DEV_BYPASS / PAYMENTS_DEV_BYPASS must be False in production."
+        "AUTH_DEV_BYPASS / PAYMENTS_DEV_BYPASS / ENDGAME_PAYMENT_BYPASS "
+        "must be False in production."
     )
 
 # No wildcard hosts in production — the allowed hosts are explicit.

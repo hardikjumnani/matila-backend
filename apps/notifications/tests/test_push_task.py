@@ -52,6 +52,18 @@ class SendPushNotificationTests(TestCase):
         self.notification.refresh_from_db()
         self.assertEqual(self.notification.push_status, PushStatus.SENT)
 
+    def test_data_payload_includes_notification_id(self) -> None:
+        self._add_token()
+        with mock.patch(
+            _SEND,
+            return_value=PushResult(
+                success_count=1, failure_count=0, invalid_tokens=[]
+            ),
+        ) as send:
+            send_push_notification(str(self.notification.id))
+        data = send.call_args.kwargs["data"]
+        self.assertEqual(data["notification_id"], str(self.notification.id))
+
     def test_invalid_tokens_deactivated(self) -> None:
         self._add_token("dead")
         with mock.patch(

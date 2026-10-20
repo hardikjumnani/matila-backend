@@ -59,6 +59,14 @@ class ChatService:
     ONGOING_STATUSES = (ChatStatus.ACTIVE, ChatStatus.EXTENDED, ChatStatus.REVEALED)
     # Statuses in which messages may still be written.
     WRITABLE_STATUSES = ONGOING_STATUSES
+    # Statuses that occupy the one-anonymous-chat matchmaking slot: any still-open
+    # anonymous window. A REVEALED or ENDED chat frees the slot. EXPIRED counts
+    # because its decision round is still pending. See AI_BRIDGE [00055].
+    MATCH_BLOCKING_STATUSES = (
+        ChatStatus.ACTIVE,
+        ChatStatus.EXTENDED,
+        ChatStatus.EXPIRED,
+    )
 
     def __init__(self, *, notification_service=None) -> None:
         # Imported lazily to avoid a hard import at module load; injectable for
@@ -89,13 +97,57 @@ class ChatService:
         )
         return participant.chat if participant else None
 
+    def get_open_anonymous_chat(self, user: User) -> Chat | None:
+        """The user's chat that still occupies the matchmaking slot (ACTIVE /
+        EXTENDED / EXPIRED). Excludes REVEALED and ENDED, so matchmaking status does
+        not read a revealed chat as MATCHED. See AI_BRIDGE [00056]."""
+        participant = (
+            ChatParticipant.objects.select_related("chat")
+            .filter(
+                user=user,
+                status=ParticipantStatus.ACTIVE,
+                chat__status__in=self.MATCH_BLOCKING_STATUSES,
+            )
+            .first()
+        )
+        return participant.chat if participant else None
+
     def has_active_chat(self, user: User) -> bool:
-        """Whether the user is currently in an ongoing chat (the 1-chat rule)."""
+        """Whether the user is currently in an ongoing chat (writable: ACTIVE,
+        EXTENDED, REVEALED). Used for writability-style checks, NOT the matchmaking
+        slot (see has_open_anonymous_chat)."""
         return ChatParticipant.objects.filter(
             user=user,
             status=ParticipantStatus.ACTIVE,
             chat__status__in=self.ONGOING_STATUSES,
         ).exists()
+
+    def has_open_anonymous_chat(self, user: User) -> bool:
+        """Whether the user still occupies the one-anonymous-chat matchmaking slot.
+        Blocks a new match while an anonymous window is open (ACTIVE / EXTENDED /
+        EXPIRED-with-pending-decision); a REVEALED or ENDED chat frees the slot.
+        See AI_BRIDGE [00055]."""
+        return ChatParticipant.objects.filter(
+            user=user,
+            status=ParticipantStatus.ACTIVE,
+            chat__status__in=self.MATCH_BLOCKING_STATUSES,
+        ).exists()
+
+    def past_partner_ids(self, user: User) -> set:
+        """Ids of every user this person has ever shared a chat with, in any chat
+        status (active, ended, revealed, expired).
+
+        Derived from the retained ``chat_participants`` history (chats are never
+        deleted), so no separate "matched pairs" table is needed. Matchmaking uses
+        this to never re-pair two people who have already been matched.
+        """
+        return set(
+            ChatParticipant.objects.filter(
+                chat_id__in=ChatParticipant.objects.filter(user=user).values("chat_id")
+            )
+            .exclude(user_id=user.id)
+            .values_list("user_id", flat=True)
+        )
 
     def get_participant(self, chat: Chat, user: User) -> ChatParticipant | None:
         return ChatParticipant.objects.filter(chat=chat, user=user).first()
@@ -160,7 +212,9 @@ class ChatService:
             return ServiceResult.fail(
                 "VALIDATION_ERROR", "Cannot create a chat with a single user."
             )
-        if self.has_active_chat(user_a) or self.has_active_chat(user_b):
+        if self.has_open_anonymous_chat(user_a) or self.has_open_anonymous_chat(
+            user_b
+        ):
             return ServiceResult.fail(
                 "CONFLICT", "One of the users is already in an active chat."
             )
@@ -280,6 +334,10 @@ class ChatService:
                 ]
             )
             self._broadcast_state_change(chat.id, old_status, ChatStatus.EXTENDED)
+        # Activity marker in the chat log (rendered as a divider by the client),
+        # created after commit so a marker failure can never roll back the extend.
+        # Emitted at this single chokepoint so every extend path is covered.
+        self._system_message(chat, "Chat extended for another 48 hours", "extend")
         chat.refresh_from_db(fields=["anonymous_chat_extension_count"])
         logger.info("Chat %s extended.", chat.id)
         return ServiceResult.ok(chat)
@@ -303,6 +361,11 @@ class ChatService:
             chat.status_changed_at = now
             chat.save(update_fields=["status", "current_phase", "status_changed_at"])
             self._broadcast_state_change(chat.id, old_status, ChatStatus.REVEALED)
+        # Activity marker, created after commit (best-effort, never rolls back the
+        # reveal). Reached only on the real transition since the REVEALED/ENDED
+        # guards return inside the atomic above; covers standard + safe reveal +
+        # reveal-on-expiry, which all funnel through here.
+        self._system_message(chat, "You both revealed", "reveal")
         logger.info("Chat %s revealed.", chat.id)
         return ServiceResult.ok(chat)
 
@@ -360,6 +423,25 @@ class ChatService:
         return ServiceResult.ok(participant)
 
     # -- Internal helpers ---------------------------------------------------
+
+    def _system_message(self, chat, content: str, kind: str) -> None:
+        """Emit a SYSTEM activity-marker message (reveal / extend) into the chat.
+
+        Best-effort: a delivery failure is logged and swallowed so it can never
+        roll back or fail the lifecycle transition that triggered it. Lazy import
+        avoids a chats<->messaging import cycle. The message carries
+        ``metadata.kind`` and a clear text so the client can render a divider.
+        """
+        try:
+            from apps.messaging.services.message_service import MessageService
+
+            MessageService().create_system_message(
+                chat=chat, content=content, metadata={"kind": kind}
+            )
+        except Exception:  # noqa: BLE001 — a marker must never break reveal/extend.
+            logger.warning(
+                "Failed to create '%s' system message for chat %s", kind, chat.id
+            )
 
     def _broadcast_state_change(
         self, chat_id, old_status: str, new_status: str

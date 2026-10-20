@@ -49,7 +49,7 @@ class VerifyPurchaseRequestSerializer(serializers.Serializer):
 
 
 class StorePurchaseRequestSerializer(serializers.Serializer):
-    """Google Play: buy a standard-reveal bundle → grants reveal_coins."""
+    """Google Play: buy a coin pack, granting unified coins."""
 
     product_id = serializers.CharField()
     purchase_token = serializers.CharField()
@@ -61,5 +61,6 @@ class PayWithCoinRequestSerializer(serializers.Serializer):
         choices=[
             (PaymentPurpose.REVEAL, "Reveal"),
             (PaymentPurpose.SAFE_REVEAL, "Safe reveal"),
+            (PaymentPurpose.CHAT_EXTENSION, "Chat extension"),
         ]
     )

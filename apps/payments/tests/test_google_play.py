@@ -82,7 +82,7 @@ class GooglePlayPaymentTests(TestCase):
             self._verify(self.girl, "tok_g", "safe_reveal_female")
         payment = Payment.objects.get(user=self.boy, chat=self.chat)
         self.assertEqual(payment.provider, PaymentProvider.GOOGLE_PLAY)
-        self.assertEqual(payment.amount_in_paise, 2900)  # male safe reveal price
+        self.assertEqual(payment.amount_in_paise, 5000)  # male safe reveal price
 
     def test_safe_reveal_wrong_sku_for_gender_rejected(self) -> None:
         self._reach_safe_payment()

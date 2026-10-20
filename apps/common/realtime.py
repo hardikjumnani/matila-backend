@@ -31,6 +31,14 @@ def chat_group_name(chat_id: str) -> str:
     return f"chat_{chat_id}"
 
 
+def presence_key(user_id) -> str:
+    """Cache key for a user's per-chat WebSocket presence (truthy while online,
+    value is the last-seen ISO timestamp). Shared by the consumer (writer) and
+    the chat serializer (reads it for the ``other_participant.is_online``
+    snapshot), so the format never drifts between them."""
+    return f"presence:user:{user_id}"
+
+
 def build_group_message(
     event: str, payload: dict[str, Any], *, exclude_user_id: str | None = None
 ) -> dict[str, Any]:

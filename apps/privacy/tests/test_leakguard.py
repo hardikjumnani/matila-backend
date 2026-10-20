@@ -169,6 +169,97 @@ class CrossMessageTextTests(SimpleTestCase):
         self.assertFalse(v.blocked)
 
 
+class MultilingualAndEvasionTests(SimpleTestCase):
+    """New v2 capabilities: multilingual keyword dictionaries, cross-script
+    confusables, international phone validation, meeting signals, self-name."""
+
+    def setUp(self) -> None:
+        self.g = LeakGuard()
+
+    def _blocked(self, text, category=None, **kw):
+        v = self.g.scan(text, **kw)
+        self.assertTrue(v.blocked, f"expected BLOCK for {text!r} (hits={v.hits})")
+        if category:
+            self.assertEqual(v.top_category, category, f"{text!r} -> {v.hits}")
+        return v
+
+    def test_hindi_steer(self):
+        self._blocked("insta pe add kar", LeakCategory.STEERING.value)
+
+    def test_hindi_solicitation(self):
+        self._blocked("number bhej do", LeakCategory.SOLICITATION.value)
+
+    def test_tamil_steer(self):
+        self._blocked("insta la add pannu", LeakCategory.STEERING.value)
+
+    def test_gujarati_solicitation(self):
+        self._blocked("number aapo", LeakCategory.SOLICITATION.value)
+
+    def test_bengali_spelled_phone(self):
+        # Bengali number words feed the reassembler.
+        self._blocked("noy aat saat chhoy paanch char tin dui ek shunno",
+                      LeakCategory.PHONE.value)
+
+    def test_confusable_platform_steer(self):
+        # Cyrillic 'і' inside "insta" folds to ASCII, so the steer still trips.
+        self._blocked("add me on іnsta", LeakCategory.STEERING.value)
+
+    def test_international_phone(self):
+        self._blocked("+1 415 555 2671", LeakCategory.PHONE.value)
+
+    def test_meeting_combination(self):
+        self._blocked("lets meet at the canteen tomorrow", LeakCategory.MEETING.value)
+
+    def test_lone_venue_allowed(self):
+        self.assertFalse(self.g.scan("is the canteen open right now").blocked)
+
+    def test_self_name_blocked_own_only(self):
+        self._blocked("hey i am hardik", LeakCategory.SELF_NAME.value,
+                      sender_name="Hardik Jumnani")
+        # The partner's name is never checked against this sender.
+        self.assertFalse(self.g.scan("are you isha", sender_name="Hardik Jumnani").blocked)
+
+
+class EvasionV21Tests(SimpleTestCase):
+    """v2.1: space-stripping, misspelling/stretch, and split-across-messages,
+    with Scunthorpe false-positive guards."""
+
+    def setUp(self) -> None:
+        self.g = LeakGuard()
+
+    def test_particle_deglue_destination(self):
+        # "thecafe" -> "the cafe" (de-glue) so the venue is seen.
+        v = self.g.scan("lets meet at thecafe")
+        self.assertTrue(v.blocked)
+        self.assertEqual(v.top_category, LeakCategory.MEETING.value)
+
+    def test_stretch_steer(self):
+        self.assertTrue(self.g.scan("instaaa add me").blocked)
+
+    def test_glued_steer(self):
+        self.assertTrue(self.g.scan("addmeoninstagram").blocked)
+
+    def test_misspelling_doubling_meeting(self):
+        # "mee" squeezes to "me" so "meet mee" forms the invite.
+        self.assertTrue(self.g.scan("meet mee at the cafe").blocked)
+
+    def test_owner_split_evasion(self):
+        # The exact reported evasion: "meet mee at" then "Thecafe".
+        self.assertFalse(self.g.scan("meet mee at").blocked)
+        v = self.g.scan("Thecafe", prior_text="meet mee at")
+        self.assertTrue(v.blocked)
+        self.assertEqual(v.top_category, LeakCategory.MEETING.value)
+
+    def test_fp_instance(self):
+        self.assertFalse(self.g.scan("this is just an instance of a problem").blocked)
+
+    def test_fp_install(self):
+        self.assertFalse(self.g.scan("lets install the app and restart").blocked)
+
+    def test_fp_decaf(self):
+        self.assertFalse(self.g.scan("decaffeinated coffee is the best").blocked)
+
+
 class HelperTests(SimpleTestCase):
     def test_extract_digits_mixed(self):
         self.assertEqual(extract_digits("two cats 3 dogs nine"), "239")

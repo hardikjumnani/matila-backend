@@ -79,6 +79,12 @@ class Message(UUIDModel):
                 fields=["media_status", "media_expires_at"],
                 name="idx_message_media_expiry",
             ),
+            # Veil cross-message window: a sender's last N messages in a chat
+            # (newest first). Index-only scan for VeilService._build_window.
+            models.Index(
+                fields=["chat", "sender", "-created_at"],
+                name="idx_message_chat_sender_dt",
+            ),
         ]
 
     def __str__(self) -> str:

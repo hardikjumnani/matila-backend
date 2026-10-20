@@ -75,6 +75,19 @@ class User(TimeStampedUUIDModel):
     # Multi-select: a JSON list of Gender values the user is willing to match
     # with. Matching (MatchmakingService) requires mutual compatibility.
     gender_preferences = models.JSONField(default=list, blank=True)
+    # Date of birth, captured once at onboarding (set-once; not editable after).
+    # Nullable: pre-feature users have none, and such users are simply excluded
+    # by any active age filter (age cannot be verified). Age is derived, never
+    # stored. See the ``age`` property below and the matchmaking age filter.
+    date_of_birth = models.DateField(null=True, blank=True)
+
+    # --- Age preference (relationship-intent hard filter) -------------------
+    # Off by default ("all ages"). When enabled on a RELATIONSHIP user, matching
+    # restricts partners to [age_preference_min, age_preference_max] inclusive.
+    # Stored regardless of intent but applied only for relationship intent.
+    age_preference_enabled = models.BooleanField(default=False)
+    age_preference_min = models.PositiveSmallIntegerField(null=True, blank=True)
+    age_preference_max = models.PositiveSmallIntegerField(null=True, blank=True)
 
     # --- Verification -------------------------------------------------------
     verification_status = models.CharField(
@@ -102,7 +115,9 @@ class User(TimeStampedUUIDModel):
         ]
 
     def __str__(self) -> str:
-        return f"User<{self.id}> {self.college_email}"
+        # "<name>--<id>": full_name when set, else college_email (users are blank
+        # pre-onboarding) so the label is never just "--<id>".
+        return f"{self.full_name or self.college_email}--{self.id}"
 
     # --- DRF / Channels compatibility --------------------------------------
     # This is a Firebase-authenticated domain model, not a Django auth user, so
@@ -115,3 +130,18 @@ class User(TimeStampedUUIDModel):
     @property
     def is_anonymous(self) -> bool:
         return False
+
+    @property
+    def age(self) -> int | None:
+        """Current age in whole years from ``date_of_birth``, or None if unset.
+
+        Derived (never stored) so it stays correct as time passes. Accounts for
+        whether this year's birthday has occurred yet.
+        """
+        if self.date_of_birth is None:
+            return None
+        from django.utils import timezone
+
+        today = timezone.now().date()
+        dob = self.date_of_birth
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))

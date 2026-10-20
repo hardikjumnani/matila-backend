@@ -19,6 +19,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.results import ServiceResult
+from apps.users.constants import MAX_AGE, MIN_AGE
 from apps.users.enums import AccountStatus, NextAction, VerificationStatus
 from apps.users.models import User
 
@@ -95,11 +96,17 @@ class AuthService:
         gender: str | None = None,
         intent: str | None = None,
         gender_preferences: list[str] | None = None,
+        date_of_birth=None,
+        age_preference_enabled: bool | None = None,
+        age_preference_min: int | None = None,
+        age_preference_max: int | None = None,
     ) -> ServiceResult[User]:
         """Update editable profile fields.
 
         Gender becomes immutable once verification is approved (frozen rule);
-        college email is never editable through the API.
+        college email is never editable through the API. Date of birth is set
+        once at onboarding (not editable after). Age preference is a
+        relationship-intent matching filter; see the matchmaking service.
         """
         # Pre-launch lock: once a user has onboarded, the app is countdown-only
         # until their college launches — no profile edits. (Initial onboarding,
@@ -130,10 +137,91 @@ class AuthService:
             user.gender_preferences = gender_preferences
             update_fields.append("gender_preferences")
 
+        if date_of_birth is not None:
+            # Set-once: DOB is captured at onboarding and never changed via the API
+            # afterward (protects the age-filter integrity; admins can correct).
+            if user.onboarding_completed_at is not None:
+                return ServiceResult.fail(
+                    "CONFLICT", "Date of birth cannot be changed after onboarding."
+                )
+            dob_error = self._dob_error(date_of_birth)
+            if dob_error is not None:
+                return ServiceResult.fail("VALIDATION_ERROR", dob_error)
+            user.date_of_birth = date_of_birth
+            update_fields.append("date_of_birth")
+
+        if (
+            age_preference_enabled is not None
+            or age_preference_min is not None
+            or age_preference_max is not None
+        ):
+            pref_error = self._apply_age_preference(
+                user,
+                enabled=age_preference_enabled,
+                lo=age_preference_min,
+                hi=age_preference_max,
+                update_fields=update_fields,
+            )
+            if pref_error is not None:
+                return ServiceResult.fail("VALIDATION_ERROR", pref_error)
+
         if update_fields:
             update_fields.append("updated_at")
             user.save(update_fields=update_fields)
         return ServiceResult.ok(user)
+
+    @staticmethod
+    def _dob_error(dob) -> str | None:
+        """Validate a date of birth: not in the future and at least MIN_AGE.
+
+        Returns an error message, or None when valid.
+        """
+        today = timezone.now().date()
+        if dob > today:
+            return "Date of birth cannot be in the future."
+        age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        if age < MIN_AGE:
+            return f"You must be at least {MIN_AGE} years old to use Matila."
+        return None
+
+    @staticmethod
+    def _apply_age_preference(
+        user: User,
+        *,
+        enabled: bool | None,
+        lo: int | None,
+        hi: int | None,
+        update_fields: list[str],
+    ) -> str | None:
+        """Merge the incoming age-preference fields onto the user and validate the
+        effective state. Returns an error message, or None when applied.
+
+        Disabling keeps the stored range so re-enabling restores it. When the
+        effective state is enabled, both bounds must be present, ordered, and in
+        range.
+        """
+        eff_enabled = enabled if enabled is not None else user.age_preference_enabled
+        eff_lo = lo if lo is not None else user.age_preference_min
+        eff_hi = hi if hi is not None else user.age_preference_max
+
+        if eff_enabled:
+            if eff_lo is None or eff_hi is None:
+                return "An age preference needs both a minimum and a maximum age."
+            if not (MIN_AGE <= eff_lo <= MAX_AGE and MIN_AGE <= eff_hi <= MAX_AGE):
+                return f"Age preference must be within {MIN_AGE} and {MAX_AGE}."
+            if eff_lo > eff_hi:
+                return "age_preference_min must be <= age_preference_max."
+
+        if enabled is not None:
+            user.age_preference_enabled = enabled
+            update_fields.append("age_preference_enabled")
+        if lo is not None:
+            user.age_preference_min = lo
+            update_fields.append("age_preference_min")
+        if hi is not None:
+            user.age_preference_max = hi
+            update_fields.append("age_preference_max")
+        return None
 
     def complete_onboarding(self, user: User) -> ServiceResult[User]:
         """Mark onboarding complete once required profile fields are present."""
@@ -143,6 +231,7 @@ class AuthService:
                 ("full_name", user.full_name),
                 ("gender", user.gender),
                 ("intent", user.intent),
+                ("date_of_birth", user.date_of_birth),
             )
             if not value
         ]
@@ -153,6 +242,11 @@ class AuthService:
                 "VALIDATION_ERROR",
                 f"Onboarding is incomplete: missing {', '.join(missing)}.",
             )
+        # Defensive: a DOB present on the row must still satisfy the age floor.
+        if user.date_of_birth is not None:
+            dob_error = self._dob_error(user.date_of_birth)
+            if dob_error is not None:
+                return ServiceResult.fail("VALIDATION_ERROR", dob_error)
 
         if user.onboarding_completed_at is None:
             user.onboarding_completed_at = timezone.now()

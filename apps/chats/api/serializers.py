@@ -87,6 +87,27 @@ class ChatSerializer(serializers.Serializer):
                 else None
             ),
             "last_read_at": participant.last_read_at,
+            # Presence snapshot so the online dot is correct the moment the chat
+            # opens, without waiting for a live presence.update edge event. Read
+            # from the same per-chat presence cache the consumer writes; absent
+            # (expired TTL / never connected) reads as offline. last_seen_at is
+            # the partner's last heartbeat/connect time (ISO) or null.
+            **self._presence_snapshot(participant.user_id),
+        }
+
+    @staticmethod
+    def _presence_snapshot(user_id) -> dict:
+        from django.core.cache import cache
+
+        from apps.common.realtime import presence_key
+
+        raw = cache.get(presence_key(user_id))
+        # last_seen_at is the stored ISO timestamp; guard against any legacy/
+        # non-ISO value (e.g. a pre-change "1") leaking through as a timestamp.
+        is_iso = isinstance(raw, str) and "T" in raw
+        return {
+            "is_online": raw is not None,
+            "last_seen_at": raw if is_iso else None,
         }
 
     def get_unread_count(self, obj) -> int:

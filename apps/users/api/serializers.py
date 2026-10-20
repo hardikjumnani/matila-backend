@@ -11,6 +11,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.common.media import resolve_media_url
+from apps.users.constants import MAX_AGE, MIN_AGE
 from apps.users.enums import Gender, Intent
 from apps.users.models import User
 
@@ -23,6 +24,8 @@ class UserSerializer(serializers.ModelSerializer):
     profile_photo_url = serializers.SerializerMethodField()
     college = serializers.SerializerMethodField()
     launched = serializers.SerializerMethodField()
+    # Derived age (property on the model); null until a DOB is set.
+    age = serializers.IntegerField(read_only=True, allow_null=True)
 
     class Meta:
         model = User
@@ -34,6 +37,11 @@ class UserSerializer(serializers.ModelSerializer):
             "gender",
             "intent",
             "gender_preferences",
+            "date_of_birth",
+            "age",
+            "age_preference_enabled",
+            "age_preference_min",
+            "age_preference_max",
             "verification_status",
             "verified_at",
             "account_status",
@@ -72,10 +80,28 @@ class UserProfileUpdateSerializer(serializers.Serializer):
         required=False,
         allow_empty=True,
     )
+    # DOB is accepted only during onboarding (set-once); the service enforces the
+    # set-once rule and the minimum-age floor. Here we only shape it as a date.
+    date_of_birth = serializers.DateField(required=False)
+    # Age preference (relationship-intent filter). Bounds match the picker; the
+    # cross-field + enabled-requires-range rules are finalized in the service.
+    age_preference_enabled = serializers.BooleanField(required=False)
+    age_preference_min = serializers.IntegerField(
+        required=False, min_value=MIN_AGE, max_value=MAX_AGE
+    )
+    age_preference_max = serializers.IntegerField(
+        required=False, min_value=MIN_AGE, max_value=MAX_AGE
+    )
 
     def validate(self, attrs: dict) -> dict:
         if not attrs:
             raise serializers.ValidationError("No editable fields were provided.")
+        lo = attrs.get("age_preference_min")
+        hi = attrs.get("age_preference_max")
+        if lo is not None and hi is not None and lo > hi:
+            raise serializers.ValidationError(
+                "age_preference_min must be <= age_preference_max."
+            )
         return attrs
 
 

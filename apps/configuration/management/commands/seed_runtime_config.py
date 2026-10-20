@@ -28,24 +28,40 @@ from apps.configuration.services.configuration_service import ConfigurationServi
 # key -> (value, description). Descriptions surface in the admin UI later.
 APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
     AppConfigKey.REVEAL_PRICE_PAISE: (
-        3900,
-        "Standard reveal price in paise (Rs.39 per side / per coin).",
+        APP_CONFIG_DEFAULTS[AppConfigKey.REVEAL_PRICE_PAISE],
+        "Direct-cash reveal price in paise (Rs.70 per side).",
     ),
     AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE: (
-        6900,
-        "Safe reveal price for the girl in paise (Rs.69).",
+        APP_CONFIG_DEFAULTS[AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE],
+        "Direct-cash safe reveal price for the girl in paise (Rs.100).",
     ),
     AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE: (
-        2900,
-        "Safe reveal price for the boy in paise (Rs.29).",
-    ),
-    AppConfigKey.STANDARD_REVEAL_BUNDLES: (
-        APP_CONFIG_DEFAULTS[AppConfigKey.STANDARD_REVEAL_BUNDLES],
-        "Standard-reveal coin bundles sold in the store (with cut prices).",
+        APP_CONFIG_DEFAULTS[AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE],
+        "Direct-cash safe reveal price for the boy in paise (Rs.50).",
     ),
     AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: (
-        2900,
-        "2-day chat-extension price in paise (Rs.29 per user, repeatable).",
+        APP_CONFIG_DEFAULTS[AppConfigKey.CHAT_EXTENSION_PRICE_PAISE],
+        "Direct-cash chat-extension price in paise (Rs.50 per user, repeatable).",
+    ),
+    AppConfigKey.COIN_COST_REVEAL: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_REVEAL],
+        "Coin cost of a reveal side.",
+    ),
+    AppConfigKey.COIN_COST_SAFE_REVEAL_MALE: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_SAFE_REVEAL_MALE],
+        "Coin cost of the boy's safe-reveal side.",
+    ),
+    AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE],
+        "Coin cost of the girl's safe-reveal side.",
+    ),
+    AppConfigKey.COIN_COST_EXTEND: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_EXTEND],
+        "Coin cost of an extend side.",
+    ),
+    AppConfigKey.COIN_PACKS: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_PACKS],
+        "Store coin packs sold for cash (with cut prices).",
     ),
     AppConfigKey.RATING_QUESTIONNAIRE: (
         APP_CONFIG_DEFAULTS[AppConfigKey.RATING_QUESTIONNAIRE],

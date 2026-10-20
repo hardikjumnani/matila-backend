@@ -32,6 +32,7 @@ class _StubConfig:
         return {
             AppConfigKey.VEIL_MODE: self.mode,
             AppConfigKey.VEIL_WINDOW_SECONDS: self.window,
+            AppConfigKey.VEIL_MESSAGE_WINDOW: 5,
             AppConfigKey.VEIL_ESCALATE_THRESHOLD: self.threshold,
         }.get(key, default)
 
@@ -56,6 +57,19 @@ class VeilServiceTests(TestCase):
             audit_service=mock.MagicMock(),
         )
 
+    def _persist(self, text):
+        """Persist a sent message so the DB-derived cross-message window sees it
+        (MessageService does this after Veil allows a message in real flow)."""
+        from apps.messaging.enums import MessageType
+        from apps.messaging.models import Message
+
+        return Message.objects.create(
+            chat=self.chat,
+            sender=self.user,
+            message_type=MessageType.TEXT,
+            text_content=text,
+        )
+
     def test_blocks_phone_and_records_raw(self):
         svc = self._svc()
         d = svc.inspect_text(chat=self.chat, sender=self.user, text="9876543210")
@@ -78,6 +92,7 @@ class VeilServiceTests(TestCase):
             chat=self.chat, sender=self.user, text="my number is nine eight seven six"
         )
         self.assertFalse(d1.blocked)
+        self._persist("my number is nine eight seven six")  # sent -> enters window
         d2 = svc.inspect_text(
             chat=self.chat, sender=self.user, text="five four three two one zero"
         )
@@ -87,8 +102,40 @@ class VeilServiceTests(TestCase):
         svc = self._svc()
         d1 = svc.inspect_text(chat=self.chat, sender=self.user, text="add me")
         self.assertFalse(d1.blocked)
+        self._persist("add me")  # sent -> enters the last-N-messages window
         d2 = svc.inspect_text(chat=self.chat, sender=self.user, text="on insta")
         self.assertTrue(d2.blocked)
+
+    def test_blocked_attempt_not_persisted_does_not_pollute_window(self):
+        # A blocked attempt is never persisted, so it must not seed the window for
+        # the next message (unlike the old reset-on-block cache behaviour).
+        svc = self._svc()
+        svc.inspect_text(chat=self.chat, sender=self.user, text="add me on insta")
+        # "add me on insta" blocked and NOT persisted; a lone "insta" next is LOW.
+        d = svc.inspect_text(chat=self.chat, sender=self.user, text="insta")
+        self.assertFalse(d.blocked)
+
+    def test_self_name_blocks_sender_but_not_partner(self):
+        self.user.full_name = "Hardik Jumnani"
+        self.user.save(update_fields=["full_name"])
+        svc = self._svc()
+        own = svc.inspect_text(chat=self.chat, sender=self.user, text="hey i'm hardik")
+        self.assertTrue(own.blocked)  # own name -> blocked
+        other = svc.inspect_text(
+            chat=self.chat, sender=self.user, text="are you isha"
+        )
+        self.assertFalse(other.blocked)  # partner's name -> never checked
+
+    def test_meeting_combination_blocks_but_lone_venue_allows(self):
+        svc = self._svc()
+        lone = svc.inspect_text(
+            chat=self.chat, sender=self.user, text="is the canteen open"
+        )
+        self.assertFalse(lone.blocked)
+        plan = svc.inspect_text(
+            chat=self.chat, sender=self.user, text="lets meet at the canteen tomorrow"
+        )
+        self.assertTrue(plan.blocked)
 
     def test_shadow_mode_allows_but_records(self):
         svc = self._svc(mode=VeilMode.SHADOW.value)

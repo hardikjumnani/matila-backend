@@ -64,7 +64,23 @@ class VerificationApiTests(TestCase):
     def test_gesture_returns_instruction(self) -> None:
         response = self.client.get("/api/v1/verification/gesture")
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["data"]["gesture"])
+        gesture = response.json()["data"]["gesture"]
+        self.assertTrue(gesture["code"])
+        self.assertTrue(gesture["label"])
+        self.assertTrue(gesture["emoji"])
+
+    def test_gesture_endpoint_is_idempotent(self) -> None:
+        from apps.verification.models import VerificationRequest
+
+        first = self.client.get("/api/v1/verification/gesture").json()["data"]["gesture"]
+        second = self.client.get("/api/v1/verification/gesture").json()["data"][
+            "gesture"
+        ]
+        self.assertEqual(first["code"], second["code"])
+        # No second attempt spawned; the same draft is reused.
+        self.assertEqual(
+            VerificationRequest.objects.filter(user=self.user).count(), 1
+        )
 
     def test_upload_sets_progress_flag(self) -> None:
         self.client.get("/api/v1/verification/gesture")

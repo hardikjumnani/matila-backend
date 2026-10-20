@@ -30,6 +30,10 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
     reviewed_by_id = serializers.UUIDField(read_only=True, allow_null=True)
     college_id_image_url = serializers.SerializerMethodField()
     gesture_selfie_image_url = serializers.SerializerMethodField()
+    # Resolved {code, label, emoji} for the requested gesture (raw code stays in
+    # gesture_type for back-compat). Falls back gracefully for historical codes no
+    # longer in the pool, so old attempts still render.
+    gesture = serializers.SerializerMethodField()
 
     class Meta:
         model = VerificationRequest
@@ -39,6 +43,7 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
             "attempt_number",
             "status",
             "gesture_type",
+            "gesture",
             "college_id_image_url",
             "gesture_selfie_image_url",
             "review_notes",
@@ -55,6 +60,13 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
     def get_gesture_selfie_image_url(self, obj: VerificationRequest) -> str:
         return resolve_media_url(obj.gesture_selfie_image_url)
 
+    def get_gesture(self, obj: VerificationRequest) -> dict | None:
+        from apps.configuration.services.configuration_service import (
+            ConfigurationService,
+        )
+
+        return ConfigurationService().get_gesture(obj.gesture_type)
+
 
 class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
     """Detail view: adds the applicant's name + profile photo so the admin can
@@ -63,11 +75,17 @@ class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
 
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     profile_photo_url = serializers.SerializerMethodField()
+    date_of_birth = serializers.DateField(
+        source="user.date_of_birth", read_only=True, allow_null=True
+    )
+    age = serializers.IntegerField(source="user.age", read_only=True, allow_null=True)
 
     class Meta(AdminVerificationRequestSerializer.Meta):
         fields = AdminVerificationRequestSerializer.Meta.fields + [
             "full_name",
             "profile_photo_url",
+            "date_of_birth",
+            "age",
         ]
         read_only_fields = fields
 
@@ -141,6 +159,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     """Full user view for admin management."""
 
     profile_photo_url = serializers.SerializerMethodField()
+    age = serializers.IntegerField(read_only=True, allow_null=True)
 
     class Meta:
         model = User
@@ -152,6 +171,11 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "gender",
             "intent",
             "gender_preferences",
+            "date_of_birth",
+            "age",
+            "age_preference_enabled",
+            "age_preference_min",
+            "age_preference_max",
             "verification_status",
             "account_status",
             "onboarding_completed_at",

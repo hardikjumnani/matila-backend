@@ -464,6 +464,14 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_PATH: str = config(
 # turned on only in the development settings module.
 PAYMENTS_DEV_BYPASS: bool = config("PAYMENTS_DEV_BYPASS", default=False, cast=bool)
 
+# TEMPORARY, DEV/TEST ONLY (FE bridge [00054]): when True, a mutual payable endgame
+# decision (reveal / extend / safe reveal) executes WITHOUT any coin spend or Play
+# purchase, so on-device endgame testing works where Play Billing cannot run. This
+# is SEPARATE from PAYMENTS_DEV_BYPASS (which only skips the Play verify API call).
+# MUST be False in production (the production settings refuse to boot if it is on).
+# REMOVE this flag and its use before any real release.
+ENDGAME_PAYMENT_BYPASS: bool = config("ENDGAME_PAYMENT_BYPASS", default=False, cast=bool)
+
 # Dev-only auth bypass: accept "dev:<email>" bearer tokens (no Firebase). MUST be
 # False everywhere except local development (the admin panel / harness use it).
 AUTH_DEV_BYPASS: bool = config("AUTH_DEV_BYPASS", default=False, cast=bool)

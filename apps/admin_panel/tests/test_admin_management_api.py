@@ -105,6 +105,76 @@ class AdminConfigManagementTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ConfigurationService().get_reveal_price_paise(), 7000)
 
+    def _put_config(self, key, value):
+        return self.client.put(
+            f"/api/v1/admin/app-config/{key}", {"value": value}, format="json"
+        )
+
+    def _default_packs(self):
+        from apps.configuration.constants import APP_CONFIG_DEFAULTS, AppConfigKey
+
+        return [dict(p) for p in APP_CONFIG_DEFAULTS[AppConfigKey.COIN_PACKS]]
+
+    def test_price_rejects_negative(self) -> None:
+        resp = self._put_config("reveal_price_paise", -1)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_price_rejects_non_int(self) -> None:
+        self.assertEqual(self._put_config("coin_cost_reveal", "lots").status_code, 400)
+
+    def test_coin_packs_valid_edit(self) -> None:
+        packs = self._default_packs()
+        packs[0]["price_paise"] = 6000  # edit a price, keep the SKUs
+        self.assertEqual(self._put_config("coin_packs", packs).status_code, 200)
+
+    def test_coin_packs_rejects_original_below_price(self) -> None:
+        packs = self._default_packs()
+        packs[0]["original_price_paise"] = packs[0]["price_paise"] - 1
+        self.assertEqual(self._put_config("coin_packs", packs).status_code, 400)
+
+    def test_coin_packs_rejects_sku_rename(self) -> None:
+        packs = self._default_packs()
+        packs[0]["sku"] = "coin_pack_999"
+        self.assertEqual(self._put_config("coin_packs", packs).status_code, 400)
+
+    def test_coin_packs_rejects_removed_pack(self) -> None:
+        packs = self._default_packs()[:3]  # drop one SKU
+        self.assertEqual(self._put_config("coin_packs", packs).status_code, 400)
+
+    def test_coin_packs_rejects_duplicate_sku(self) -> None:
+        packs = self._default_packs()
+        packs[1]["sku"] = packs[0]["sku"]  # duplicate
+        self.assertEqual(self._put_config("coin_packs", packs).status_code, 400)
+
+    def _default_gestures(self):
+        from apps.configuration.constants import APP_CONFIG_DEFAULTS, AppConfigKey
+
+        return [dict(g) for g in APP_CONFIG_DEFAULTS[AppConfigKey.GESTURE_POOL]]
+
+    def test_gesture_pool_valid_edit(self) -> None:
+        pool = self._default_gestures()
+        pool[0]["label"] = "Thumbs up please"
+        self.assertEqual(self._put_config("gesture_pool", pool).status_code, 200)
+
+    def test_gesture_pool_rejects_empty(self) -> None:
+        self.assertEqual(self._put_config("gesture_pool", []).status_code, 400)
+
+    def test_gesture_pool_rejects_missing_emoji(self) -> None:
+        pool = self._default_gestures()
+        pool[0].pop("emoji")
+        self.assertEqual(self._put_config("gesture_pool", pool).status_code, 400)
+
+    def test_gesture_pool_rejects_duplicate_code(self) -> None:
+        pool = self._default_gestures()
+        pool[1]["code"] = pool[0]["code"]
+        self.assertEqual(self._put_config("gesture_pool", pool).status_code, 400)
+
+    def test_non_pricing_key_unconstrained(self) -> None:
+        self.assertEqual(
+            self._put_config("support_email", "help@matila.in").status_code, 200
+        )
+
     def test_flag_list(self) -> None:
         response = self.client.get("/api/v1/admin/feature-flags")
         self.assertEqual(response.status_code, 200)

@@ -48,6 +48,10 @@ def send_push_notification(self, notification_id: str) -> None:
         return
 
     data = {
+        # notification_id == the REST notification `id` so a foreground push and
+        # the later GET /notifications copy share one dedup key on the client
+        # (prevents duplicate rows in the alerts list). Present for every type.
+        "notification_id": str(notification.id),
         "type": notification.type,
         "action_type": notification.action_type,
         "action_payload": json.dumps(notification.action_payload or {}),

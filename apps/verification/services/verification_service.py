@@ -140,8 +140,17 @@ class VerificationService:
         )
         return ServiceResult.ok(draft)
 
-    def generate_gesture(self, user: User) -> ServiceResult[str]:
-        """Assign a random gesture instruction to the user's draft attempt."""
+    def generate_gesture(self, user: User) -> ServiceResult[dict]:
+        """Return the gesture for the user's current draft attempt, assigning a
+        random one the first time and staying idempotent thereafter. Stores the
+        gesture CODE on the request and returns the full {code, label, emoji} so
+        the client can render the instruction without a hardcoded code map.
+
+        The gesture stays stable across repeated calls within one attempt: re-
+        fetching the gesture screen must not re-roll it, or a selfie already taken
+        for the previous gesture would no longer match the stored one. A freshly
+        rolled gesture appears only when a new draft is created, i.e. the start of
+        a new attempt (first request, or the new draft a resubmission spawns)."""
         pool = self._config.get_gesture_pool()
         if not pool:
             return ServiceResult.fail(
@@ -153,12 +162,16 @@ class VerificationService:
                 draft_result.error_code, draft_result.error_message
             )
         draft = draft_result.data
-        # secrets.choice: unpredictable selection so the gesture cannot be
+        # Only assign when the draft has no gesture yet, so repeated requests
+        # within an attempt return the same instruction. secrets.choice: the
+        # first-time selection is unpredictable, so the gesture cannot be
         # anticipated and pre-recorded before it is requested.
-        gesture = secrets.choice(pool)
-        draft.gesture_type = gesture
-        draft.save(update_fields=["gesture_type", "updated_at"])
-        return ServiceResult.ok(gesture)
+        if not draft.gesture_type:
+            entry = secrets.choice(pool)
+            code = entry["code"] if isinstance(entry, dict) else str(entry)
+            draft.gesture_type = code
+            draft.save(update_fields=["gesture_type", "updated_at"])
+        return ServiceResult.ok(self._config.get_gesture(draft.gesture_type))
 
     def upload_college_id(
         self, user: User, *, fileobj: BinaryIO, filename: str, content_type: str

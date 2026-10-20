@@ -53,7 +53,7 @@ class AdminVerificationTests(TestCase):
             user=self.target,
             attempt_number=1,
             status=VerificationStatus.PENDING,
-            gesture_type="WAVE",
+            gesture_type="CALL_ME",
             college_id_image_url="verification/college-id/x.jpg",
             gesture_selfie_image_url="verification/gesture-selfie/y.jpg",
             submitted_at=timezone.now(),
@@ -90,10 +90,15 @@ class AdminVerificationTests(TestCase):
 
     def test_detail_includes_identity_fields(self) -> None:
         # The admin must see the applicant's name + photo to decide reject vs.
-        # resubmit (B5).
+        # resubmit (B5), plus DOB/age for the age feature (B0004).
+        from datetime import date
+
         self.target.full_name = "Riya Sharma"
         self.target.profile_photo_url = "profile-photos/riya.jpg"
-        self.target.save(update_fields=["full_name", "profile_photo_url"])
+        self.target.date_of_birth = date(2001, 3, 15)
+        self.target.save(
+            update_fields=["full_name", "profile_photo_url", "date_of_birth"]
+        )
         response = self.client.get(
             f"/api/v1/admin/verifications/{self.request.id}"
         )
@@ -101,6 +106,11 @@ class AdminVerificationTests(TestCase):
         body = response.json()["data"]
         self.assertEqual(body["full_name"], "Riya Sharma")
         self.assertTrue(body["profile_photo_url"])
+        self.assertEqual(body["date_of_birth"], "2001-03-15")
+        self.assertIsNotNone(body["age"])
+        # Resolved gesture object (code + label + emoji) from the pool.
+        self.assertEqual(body["gesture"]["code"], "CALL_ME")
+        self.assertTrue(body["gesture"]["emoji"])
 
     def test_list_omits_identity_fields(self) -> None:
         # Queue stays lean — no per-item photo SAS / thumbnails.

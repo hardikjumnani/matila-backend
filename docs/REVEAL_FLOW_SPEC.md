@@ -4,6 +4,14 @@
 > Confirmed with the product owner 2026-09-27. Code and UI state transitions
 > must follow this consistently. Where this conflicts with older frozen docs,
 > **this wins**.
+>
+> **SUPERSEDED (payments/coins), 2026-10-10:** the coin and pricing model in §5-§7
+> below is replaced by the unified-Coin, two-tier rework in
+> `COIN_REWORK_PLAN.md` (one `Coin` balance; every action is coin-redeemable at a
+> fixed cost OR bought at a direct cash price; coins sold as store packs). The
+> decision/flow/state-machine rules in the other sections still hold. Treat
+> `COIN_REWORK_PLAN.md` + `app_config` as authoritative for all coin costs and
+> prices.
 
 ## 1. Genders, intent, avatars
 - `User.gender ∈ {MALE, FEMALE}` — **required** at onboarding.

@@ -100,18 +100,19 @@ class Wallet(UUIDModel):
         on_delete=models.PROTECT,
         related_name="wallet",
     )
-    reveal_coins = models.PositiveIntegerField(default=0)
-    safe_reveal_coins = models.PositiveIntegerField(default=0)
+    # Single unified balance (replaced reveal_coins + safe_reveal_coins).
+    coins = models.PositiveIntegerField(default=0)
+    # True once the user has ever been credited any coins; never reset (stays True
+    # even after the balance returns to 0). Lets the client gate the coin-system
+    # intro for users who have never touched coins.
+    has_held_coins = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "wallets"
 
     def __str__(self) -> str:
-        return (
-            f"Wallet<{self.id}> user={self.user_id} "
-            f"reveal={self.reveal_coins} safe={self.safe_reveal_coins}"
-        )
+        return f"Wallet<{self.id}> user={self.user_id} coins={self.coins}"
 
 
 class CoinLedger(UUIDModel):

@@ -26,7 +26,6 @@ from apps.payments.constants import (
 )
 from apps.payments.enums import (
     CoinLedgerReason,
-    CoinType,
     PaymentInitiatedFrom,
     PaymentProvider,
     PaymentPurpose,
@@ -39,12 +38,17 @@ logger = logging.getLogger(__name__)
 
 _CURRENCY = "INR"
 
-# Chat-bound payable purposes and the FinalCall each corresponds to.
-_CHAT_BOUND = (PaymentPurpose.SAFE_REVEAL, PaymentPurpose.CHAT_EXTENSION)
+# Chat-bound payable purposes and the FinalCall each corresponds to. All three can
+# be paid either with coins or directly in cash (Google Play) now.
+_CHAT_BOUND = (
+    PaymentPurpose.REVEAL,
+    PaymentPurpose.SAFE_REVEAL,
+    PaymentPurpose.CHAT_EXTENSION,
+)
 _PURPOSE_TO_FINAL = {
+    PaymentPurpose.REVEAL: "REVEAL",
     PaymentPurpose.SAFE_REVEAL: "SAFE_REVEAL",
     PaymentPurpose.CHAT_EXTENSION: "EXTEND",
-    PaymentPurpose.REVEAL: "REVEAL",  # coin-funded (pay-with-coin), no money SKU
 }
 
 
@@ -191,7 +195,7 @@ class PaymentService:
             self._handle_successful_payment(payment)
         return ServiceResult.ok(payment)
 
-    # -- Store bundle purchase (grants reveal_coins) ------------------------
+    # -- Store coin-pack purchase (grants coins) ----------------------------
 
     def purchase_bundle(
         self, *, user: User, product_id: str, purchase_token: str
@@ -202,8 +206,8 @@ class PaymentService:
             return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
         if PLAY_PRODUCT_TO_PURPOSE.get(product_id) != PaymentPurpose.CREDIT_PURCHASE:
             return ServiceResult.fail("VALIDATION_ERROR", "Unknown store product.")
-        bundle = self._config.get_bundle_by_sku(product_id)
-        if bundle is None:
+        pack = self._config.get_pack_by_sku(product_id)
+        if pack is None:
             return ServiceResult.fail("VALIDATION_ERROR", "Unknown store product.")
 
         existing = Payment.objects.filter(provider_payment_id=purchase_token).first()
@@ -225,13 +229,13 @@ class PaymentService:
                 "INTERNAL_SERVER_ERROR", "Could not verify the purchase."
             )
 
-        coins = int(bundle["coins"])
+        coins = int(pack["coins"])
         try:
             payment = Payment.objects.create(
                 user=user,
                 chat=None,
                 purpose=PaymentPurpose.CREDIT_PURCHASE,
-                amount_in_paise=int(bundle["price_paise"]),
+                amount_in_paise=int(pack["price_paise"]),
                 currency=_CURRENCY,
                 provider=PaymentProvider.GOOGLE_PLAY,
                 provider_order_id=info.get("orderId") or None,
@@ -244,7 +248,6 @@ class PaymentService:
             payment = Payment.objects.get(provider_payment_id=purchase_token)
         self._credits.credit(
             user=user,
-            coin_type=CoinType.REVEAL,
             amount=coins,
             reason=CoinLedgerReason.BUNDLE_PURCHASE,
             idempotency_key=f"bundle:{purchase_token}",
@@ -271,11 +274,13 @@ class PaymentService:
     def pay_with_coin(
         self, *, user: User, chat_id: str, purpose: PaymentPurpose | str
     ) -> ServiceResult[dict]:
-        from apps.users.enums import Gender
-
-        if purpose not in (PaymentPurpose.REVEAL, PaymentPurpose.SAFE_REVEAL):
+        if purpose not in (
+            PaymentPurpose.REVEAL,
+            PaymentPurpose.SAFE_REVEAL,
+            PaymentPurpose.CHAT_EXTENSION,
+        ):
             return ServiceResult.fail(
-                "VALIDATION_ERROR", "Only reveals can be paid with coins."
+                "VALIDATION_ERROR", "This action cannot be paid with coins."
             )
         chat = self._chats.get_chat(chat_id)
         if chat is None:
@@ -287,20 +292,16 @@ class PaymentService:
         if ctx.failed:
             return ServiceResult.fail(ctx.error_code, ctx.error_message)
 
-        if purpose == PaymentPurpose.SAFE_REVEAL and user.gender == Gender.FEMALE:
-            coin_type = CoinType.SAFE_REVEAL
-        else:
-            coin_type = CoinType.REVEAL
-
+        cost = self._config.get_coin_cost(purpose, getattr(user, "gender", None))
         round_id = self._reveal.active_round_id(chat)
-        consumed = self._credits.consume(
+        spent = self._credits.spend(
             user=user,
-            coin_type=coin_type,
-            idempotency_key=f"consume:{round_id}:{user.id}:{coin_type}",
+            amount=cost,
+            idempotency_key=f"consume:{round_id}:{user.id}",
             chat=chat,
         )
-        if consumed.failed:
-            return ServiceResult.fail(consumed.error_code, consumed.error_message)
+        if spent.failed:
+            return ServiceResult.fail(spent.error_code, spent.error_message)
 
         self._reveal.record_payment(
             chat_id=str(chat.id), user=user, purpose=purpose, paid_with_coin=True

@@ -1,37 +1,20 @@
-"""Veil ruleset — the versioned data the scanner is built from.
+"""Veil ruleset — versioned, language-independent data the scanner compiles from.
 
-This is the single source of truth for the word-lists and tone templates. The
-scanner (``LeakGuard``) compiles its regexes from these lists, and ``export()``
-serialises them for the (future) client ruleset endpoint so the frontend
-pre-send check can mirror the backend without a code release.
+Per-language keyword dictionaries now live in :mod:`apps.privacy.languages` and
+are merged into one Aho-Corasick automaton by :mod:`apps.privacy.dictionaries`.
+This module keeps the data that is language-independent: platform brand names,
+UPI PSP handles, URL TLDs, the homoglyph (confusables) map, and the graduated
+block-message tones. ``export()`` serialises everything for the client pre-send
+mirror so the frontend stays in sync without an app release.
 
-Deterministic only — no AI. Everything here is tunable; bump ``RULESET_VERSION``
-whenever the lists change so ``LeakEvent.rule_version`` stays meaningful.
+Deterministic only — no AI. Bump ``RULESET_VERSION`` whenever any list changes.
 """
 
 from __future__ import annotations
 
-RULESET_VERSION = "2026.10.10-v1"
+RULESET_VERSION = "2026.10.12-v2.2"
 
-# --- Spelled-out digits -----------------------------------------------------
-# English + a conservative Hinglish set. Deliberately EXCLUDES ambiguous tokens
-# that collide with ordinary English words ("do", "no", "oh" alone, "to") to
-# keep the Number Reassembler's false-positive rate low. Devanagari digits are
-# handled by a direct translation table in the scanner.
-SPELLED_DIGITS: dict[str, str] = {
-    "zero": "0", "oh": "0", "nought": "0", "shunya": "0",
-    "one": "1", "ek": "1",
-    "two": "2", "dho": "2",
-    "three": "3", "teen": "3",
-    "four": "4", "char": "4",
-    "five": "5", "paanch": "5", "panch": "5",
-    "six": "6", "chhe": "6", "che": "6", "chah": "6",
-    "seven": "7", "saat": "7", "sat": "7",
-    "eight": "8", "aath": "8", "ath": "8",
-    "nine": "9", "nau": "9",
-}
-
-# --- Platforms / contact nouns (for steering / solicitation / handles) ------
+# --- Platforms / contact nouns (language-independent brand + contact words) --
 PLATFORM_WORDS: list[str] = [
     "instagram", "insta", "instagrm", "ig", "gram",
     "snapchat", "snap", "sc",
@@ -41,11 +24,10 @@ PLATFORM_WORDS: list[str] = [
     "signal", "messenger", "facebook", "fb", "twitter", "reddit", "linkedin",
     "gpay", "googlepay", "phonepe", "paytm", "bhim", "upi",
     "email", "gmail", "mail",
-    "number", "mobile", "contact", "digits", "phone", "cell", "whatsap",
+    "number", "mobile", "contact", "digits", "phone", "cell",
 ]
 
-# UPI PSP handles (the part after '@' in a VPA). Restricted list keeps the UPI
-# detector from firing on ordinary "name@word" text.
+# UPI PSP handles (the part after '@' in a VPA).
 PSP_HANDLES: list[str] = [
     "oksbi", "okhdfcbank", "okicici", "okaxis", "okbizaxis",
     "ybl", "ibl", "axl", "apl", "yapl", "waaxis", "wahdfcbank",
@@ -59,56 +41,70 @@ URL_TLDS: list[str] = [
     "link", "ee", "ly", "gg", "xyz", "site", "page", "bio",
 ]
 
-# Verbs that signal *asking* for an identifier (solicitation).
-ASK_VERBS: list[str] = [
-    "give", "send", "share", "drop", "tell", "pass", "whats", "what's",
-    "what is", "lemme get", "can i get", "need your",
-]
-
-# Verbs that signal steering the conversation off-platform.
-STEER_VERBS: list[str] = [
-    "add", "find", "dm", "text", "call", "msg", "message", "ping", "reach",
-    "catch", "move", "switch", "connect", "chat", "hit", "follow", "come",
-]
+# --- Confusables (homoglyph) map --------------------------------------------
+# NFKC already folds fullwidth/compatibility forms; this covers cross-SCRIPT
+# lookalikes (Cyrillic / Greek letters that render like Latin) which NFKC does
+# NOT fold. Curated for the realistic evasion set, kept small to bound false
+# positives (a full TR39 skeleton can replace this later if needed).
+CONFUSABLES: dict[str, str] = {
+    # Cyrillic (lowercase)
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+    "к": "k", "м": "m", "т": "t", "в": "b", "н": "h", "і": "i", "ј": "j",
+    "ѕ": "s", "ԁ": "d", "г": "r", "п": "n", "л": "l", "д": "d", "з": "z",
+    # Cyrillic (uppercase)
+    "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
+    "Р": "p", "С": "c", "Т": "t", "Х": "x", "У": "y",
+    # Greek (lowercase)
+    "α": "a", "ο": "o", "ρ": "p", "ε": "e", "ν": "v", "τ": "t", "κ": "k",
+    "ι": "i", "μ": "u", "χ": "x", "γ": "y", "σ": "o", "υ": "u", "β": "b",
+}
+CONFUSABLES_TABLE = str.maketrans(CONFUSABLES)
 
 # --- Block message tones (graduate by offence count) ------------------------
-# {0} may be filled with a short, category-specific clause.
 TONES: dict[str, list[str]] = {
-    # offence 1: gentle
     "gentle": [
         "Heads up. Matila keeps you both anonymous for now, so contact details, "
         "socials and numbers can't be shared yet. You'll be able to once you both "
         "choose to reveal. \U0001F49B",
     ],
-    # offence 2: firmer
     "firm": [
         "Let's keep it inside Matila. Personal details can't be shared during the "
         "anonymous chat. It's what keeps this safe for everyone.",
     ],
-    # offence 3+: serious but caring
     "serious": [
         "We've had to block this again. Repeatedly trying to share or ask for "
         "personal contact details can get your account limited. It's not because we "
         "want to, but to keep everyone safe. Please keep the conversation here.",
     ],
-    # category nudge for solicitation (asking for the other person's details)
     "ask": [
         "You can't ask for their contact or socials yet. Matila stays anonymous "
         "until you both choose to reveal. \U0001F49B",
+    ],
+    # meeting-coordination nudge
+    "meet": [
+        "Planning to meet offline isn't available while you're both anonymous. "
+        "You can sort that out after you choose to reveal. \U0001F49B",
+    ],
+    # self-name nudge (the sender tried to reveal their own name)
+    "name": [
+        "Hold on. Sharing your name gives away your identity before the reveal. "
+        "Keep it anonymous for now. You'll get to share it once you both reveal. "
+        "\U0001F49B",
     ],
 }
 
 
 def export() -> dict:
-    """JSON-serialisable ruleset for the client pre-send check (future FE
-    endpoint). Mirrors the word-lists the backend scanner compiles from."""
+    """JSON-serialisable ruleset for the client pre-send check. Mirrors the data
+    the backend scanner compiles from (word-lists per language + global lists)."""
+    from apps.privacy.languages import LANGUAGES
+
     return {
         "version": RULESET_VERSION,
-        "spelled_digits": SPELLED_DIGITS,
+        "languages": LANGUAGES,
         "platform_words": PLATFORM_WORDS,
         "psp_handles": PSP_HANDLES,
         "url_tlds": URL_TLDS,
-        "ask_verbs": ASK_VERBS,
-        "steer_verbs": STEER_VERBS,
+        "confusables": CONFUSABLES,
         "tones": TONES,
     }

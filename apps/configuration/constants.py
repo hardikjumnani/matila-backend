@@ -15,11 +15,18 @@ from typing import Any
 
 
 class AppConfigKey:
+    # Direct-cash prices (paise) per action side.
     REVEAL_PRICE_PAISE = "reveal_price_paise"
     SAFE_REVEAL_FEMALE_PRICE_PAISE = "safe_reveal_female_price_paise"
     SAFE_REVEAL_MALE_PRICE_PAISE = "safe_reveal_male_price_paise"
-    STANDARD_REVEAL_BUNDLES = "standard_reveal_bundles"
     CHAT_EXTENSION_PRICE_PAISE = "chat_extension_price_paise"
+    # Coin costs per action side (unified Coin).
+    COIN_COST_REVEAL = "coin_cost_reveal"
+    COIN_COST_SAFE_REVEAL_MALE = "coin_cost_safe_reveal_male"
+    COIN_COST_SAFE_REVEAL_FEMALE = "coin_cost_safe_reveal_female"
+    COIN_COST_EXTEND = "coin_cost_extend"
+    # Store coin packs.
+    COIN_PACKS = "coin_packs"
     RATING_QUESTIONNAIRE = "rating_questionnaire"
     FAQ_CONTENT = "faq_content"
     COMMUNITY_GUIDELINES = "community_guidelines"
@@ -31,7 +38,8 @@ class AppConfigKey:
     CHAT_EXPIRY_WARNING_MINUTES = "chat_expiry_warning_minutes"
     # Veil (anti-leakage) engine, see docs/VEIL_ENGINE_PLAN.md.
     VEIL_MODE = "veil_mode"  # "shadow" | "enforce"
-    VEIL_WINDOW_SECONDS = "veil_window_seconds"
+    VEIL_WINDOW_SECONDS = "veil_window_seconds"  # legacy (time window); superseded
+    VEIL_MESSAGE_WINDOW = "veil_message_window"  # cross-message window = last N msgs
     VEIL_ESCALATE_THRESHOLD = "veil_escalate_threshold"
     # Muffle (profanity softening) engine, see docs/MUFFLE_PROFANITY_PLAN.md.
     MUFFLE_MODE = "muffle_mode"  # "shadow" | "mask"
@@ -48,37 +56,52 @@ class FeatureFlagKey:
 
 # Fallback values used when a key has not been seeded in the database.
 APP_CONFIG_DEFAULTS: dict[str, Any] = {
-    AppConfigKey.REVEAL_PRICE_PAISE: 3900,  # CHOSEN: standard reveal, Rs.39/side.
-    AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE: 6900,  # CHOSEN: safe reveal, girl Rs.69.
-    AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE: 2900,  # CHOSEN: safe reveal, boy Rs.29.
-    AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 2900,  # CHOSEN: 2-day extension, Rs.29/user.
-    # CHOSEN: standard-reveal-coin bundles sold in the store (paise). price_paise
-    # is what the user pays; original_price_paise drives the struck-through "cut"
-    # price. sku must match the Google Play managed-product id.
-    AppConfigKey.STANDARD_REVEAL_BUNDLES: [
-        {"sku": "standard_reveal_1", "coins": 1, "price_paise": 3900, "original_price_paise": 3900},
-        {"sku": "standard_reveal_3", "coins": 3, "price_paise": 9900, "original_price_paise": 12000},
-        {"sku": "standard_reveal_5", "coins": 5, "price_paise": 14900, "original_price_paise": 20000},
-        {"sku": "standard_reveal_10", "coins": 10, "price_paise": 29900, "original_price_paise": 40000},
+    # FINAL direct-cash prices (paise). Coins are the cheaper path; these are the
+    # pay-direct amounts shown to users who do not use coins.
+    AppConfigKey.REVEAL_PRICE_PAISE: 7000,  # Rs.70 reveal.
+    AppConfigKey.SAFE_REVEAL_FEMALE_PRICE_PAISE: 10000,  # Rs.100 safe reveal, girl.
+    AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE: 5000,  # Rs.50 safe reveal, boy.
+    AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 5000,  # Rs.50 extend.
+    # FINAL coin costs per action side (unified Coin).
+    AppConfigKey.COIN_COST_REVEAL: 10,
+    AppConfigKey.COIN_COST_SAFE_REVEAL_MALE: 8,
+    AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE: 16,
+    AppConfigKey.COIN_COST_EXTEND: 6,
+    # FINAL store coin packs (paise). price_paise is charged; original_price_paise
+    # drives the struck-through cut. sku must match the Google Play managed-product id.
+    AppConfigKey.COIN_PACKS: [
+        {"sku": "coin_pack_10", "coins": 10, "price_paise": 5900, "original_price_paise": 7000},
+        {"sku": "coin_pack_30", "coins": 30, "price_paise": 14900, "original_price_paise": 21000},
+        {"sku": "coin_pack_50", "coins": 50, "price_paise": 22400, "original_price_paise": 35000},
+        {"sku": "coin_pack_100", "coins": 100, "price_paise": 42900, "original_price_paise": 70000},
     ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
     # CHOSEN: Veil anti-leakage engine. Mode starts at "enforce" so the control
     # is active in dev; production should run "shadow" first to tune (see plan).
     AppConfigKey.VEIL_MODE: "enforce",
-    AppConfigKey.VEIL_WINDOW_SECONDS: 120,  # cross-message digit-reassembly window.
+    AppConfigKey.VEIL_WINDOW_SECONDS: 120,  # legacy (time window); superseded.
+    AppConfigKey.VEIL_MESSAGE_WINDOW: 8,  # cross-message window = last N sent msgs.
     AppConfigKey.VEIL_ESCALATE_THRESHOLD: 5,  # blocks before T&S escalation.
     # CHOSEN: Muffle profanity softener. "mask" is active in dev; production may
     # start "shadow" to tune the tier boundary first (see plan).
     AppConfigKey.MUFFLE_MODE: "mask",
-    # CHOSEN: gesture instructions the verification flow can request. gesture_type
-    # on a verification request is a free string drawn from this pool.
+    # CHOSEN: gesture instructions the verification flow can request. Each entry is
+    # {code, label, emoji}: the CODE is stored on verification_requests.gesture_type
+    # (stable identifier); label + emoji are presentation, served to the client so
+    # gestures can be added/relabelled at runtime with no app release. Runtime
+    # editable via the admin app-config (validated in validators.py).
     AppConfigKey.GESTURE_POOL: [
-        "THUMBS_UP",
-        "PEACE_SIGN",
-        "OPEN_PALM",
-        "CLOSED_FIST",
-        "WAVE",
+        {"code": "THUMBS_UP", "label": "Thumbs up", "emoji": "\U0001F44D"},
+        {"code": "PEACE_SIGN", "label": "Peace sign", "emoji": "✌️"},
+        {"code": "CLOSED_FIST", "label": "Closed fist", "emoji": "✊"},
+        {"code": "CALL_ME", "label": "Call me", "emoji": "\U0001F919"},
+        {"code": "LOVE_YOU_SIGN", "label": "Love-you sign", "emoji": "\U0001F91F"},
+        {"code": "ROCK_ON", "label": "Rock on", "emoji": "\U0001F918"},
+        {"code": "OK_SIGN", "label": "OK sign", "emoji": "\U0001F44C"},
+        {"code": "CROSSED_FINGERS", "label": "Crossed fingers", "emoji": "\U0001F91E"},
+        {"code": "FINGER_HEART", "label": "Finger heart", "emoji": "\U0001FAF0"},
+        {"code": "PINCHED_FINGERS", "label": "Pinched fingers", "emoji": "\U0001F90C"},
     ],
     # CHOSEN starting questionnaire; admins edit this at runtime. Answers are
     # validated against the RatingResponse value set, not this structure.

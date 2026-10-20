@@ -11,6 +11,8 @@ from django.utils import timezone
 from apps.chats.enums import ChatPhase, ChatStatus, EndReason, ParticipantStatus
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
+from apps.messaging.enums import MessageType
+from apps.messaging.models import Message
 from apps.users.models import User
 
 
@@ -102,6 +104,44 @@ class ChatServiceTests(TestCase):
         self.assertEqual(
             self.service.mark_revealed(str(chat.id)).error_code, "CONFLICT"
         )
+
+    # -- SYSTEM activity markers on reveal / extend (bridge task 17) ---------
+
+    def _system_messages(self, chat):
+        return Message.objects.filter(chat=chat, message_type=MessageType.SYSTEM)
+
+    def test_reveal_emits_system_message(self) -> None:
+        chat = self._chat()
+        self.service.mark_revealed(str(chat.id))
+        msgs = self._system_messages(chat)
+        self.assertEqual(msgs.count(), 1)
+        marker = msgs.first()
+        self.assertEqual(marker.text_content, "You both revealed")
+        self.assertEqual(marker.metadata.get("kind"), "reveal")
+        self.assertIsNone(marker.sender_id)
+
+    def test_reveal_system_message_not_duplicated_on_idempotent_call(self) -> None:
+        chat = self._chat()
+        self.service.mark_revealed(str(chat.id))
+        self.service.mark_revealed(str(chat.id))  # idempotent; no second marker
+        self.assertEqual(self._system_messages(chat).count(), 1)
+
+    def test_extend_emits_system_message(self) -> None:
+        chat = self._chat()
+        self.service.expire_chat(str(chat.id))
+        self.service.extend_chat(str(chat.id))
+        msgs = self._system_messages(chat)
+        self.assertEqual(msgs.count(), 1)
+        self.assertEqual(
+            msgs.first().text_content, "Chat extended for another 48 hours"
+        )
+        self.assertEqual(msgs.first().metadata.get("kind"), "extend")
+
+    def test_system_marker_does_not_count_toward_message_total(self) -> None:
+        chat = self._chat()
+        self.service.mark_revealed(str(chat.id))
+        chat.refresh_from_db()
+        self.assertEqual(chat.message_count, 0)
 
     def test_end_chat(self) -> None:
         chat = self._chat()

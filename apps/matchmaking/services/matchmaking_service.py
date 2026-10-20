@@ -4,8 +4,10 @@ Matchmaking service.
 Owns ``match_queue`` and creates chats (via ChatService) on a successful match.
 
 Matching is random within a compatible bucket, using hard filters on intent and
-mutual gender preference. Candidate rows are locked with ``FOR UPDATE SKIP
-LOCKED`` so two concurrent joins can never pair the same waiting user twice.
+mutual gender preference, and never re-pairs two users who have already been
+matched before (any prior shared chat excludes them). Candidate rows are locked
+with ``FOR UPDATE SKIP LOCKED`` so two concurrent joins can never pair the same
+waiting user twice.
 
 On a successful match both queue entries are deleted (the queue is ephemeral and
 has no "matched" status); the resulting chat is the record of truth, and the
@@ -97,7 +99,7 @@ class MatchmakingService:
         eligibility = self._check_eligibility(user)
         if eligibility.failed:
             return ServiceResult.fail(eligibility.error_code, eligibility.error_message)
-        if self._chats.has_active_chat(user):
+        if self._chats.has_open_anonymous_chat(user):
             return ServiceResult.fail("CONFLICT", "You are already in an active chat.")
 
         with transaction.atomic():
@@ -127,13 +129,20 @@ class MatchmakingService:
 
         Runs inside the caller's transaction. Locks candidate queue rows with
         SKIP LOCKED so simultaneous matchers never contend for the same partner.
+        Previous partners are excluded in the query (so their rows are never even
+        locked) to enforce the no-rematch rule.
         """
-        candidates = list(
+        candidate_qs = (
             MatchQueue.objects.select_for_update(skip_locked=True, of=("self",))
             .select_related("user")
             .filter(status=MatchQueueStatus.SEARCHING, intent=user.intent)
             .exclude(user_id=user.id)
         )
+        # Never re-pair someone this user has already been matched with.
+        past_ids = self._chats.past_partner_ids(user)
+        if past_ids:
+            candidate_qs = candidate_qs.exclude(user_id__in=past_ids)
+        candidates = list(candidate_qs)
         compatible = [c for c in candidates if self._is_compatible(user, entry, c)]
         if not compatible:
             return None
@@ -158,15 +167,34 @@ class MatchmakingService:
     def _is_compatible(
         self, user: User, entry: MatchQueue, candidate: MatchQueue
     ) -> bool:
-        """Mutual gender-preference compatibility (intent already filtered)."""
-        return self._gender_ok(
-            candidate.user.gender, entry.gender_preferences
-        ) and self._gender_ok(user.gender, candidate.gender_preferences)
+        """Mutual gender- and age-preference compatibility (intent already
+        filtered). Both sides' filters must pass."""
+        return (
+            self._gender_ok(candidate.user.gender, entry.gender_preferences)
+            and self._gender_ok(user.gender, candidate.gender_preferences)
+            and self._age_ok(user, candidate.user)
+            and self._age_ok(candidate.user, user)
+        )
 
     @staticmethod
     def _gender_ok(gender: str, preferences: list[str]) -> bool:
         # An empty preference list means "no restriction" (accept any gender).
         return not preferences or gender in preferences
+
+    @staticmethod
+    def _age_ok(viewer: User, other: User) -> bool:
+        """Does ``other``'s age satisfy ``viewer``'s age preference?
+
+        A side imposes an age restriction only as a RELATIONSHIP user with the
+        preference enabled; otherwise it accepts any age. An active filter cannot
+        be satisfied by an unknown age (no DOB on file).
+        """
+        if viewer.intent != Intent.RELATIONSHIP or not viewer.age_preference_enabled:
+            return True
+        other_age = other.age
+        if other_age is None:
+            return False
+        return viewer.age_preference_min <= other_age <= viewer.age_preference_max
 
     def leave(self, user: User) -> ServiceResult[None]:
         """Cancel the user's active queue entry (idempotent)."""
@@ -190,10 +218,14 @@ class MatchmakingService:
     # -- Status / stats -----------------------------------------------------
 
     def get_status(self, user: User) -> dict:
-        """Report the user's matchmaking state."""
-        active_chat = self._chats.get_active_chat(user)
-        if active_chat is not None:
-            return {"state": "MATCHED", "chat_id": str(active_chat.id)}
+        """Report the user's matchmaking state.
+
+        Uses the matchmaking slot view (open anonymous window: ACTIVE / EXTENDED /
+        EXPIRED), NOT the writable-ongoing set, so a REVEALED chat does not read as
+        MATCHED and bounce a searching user into it. See AI_BRIDGE [00056]."""
+        open_chat = self._chats.get_open_anonymous_chat(user)
+        if open_chat is not None:
+            return {"state": "MATCHED", "chat_id": str(open_chat.id)}
         entry = MatchQueue.objects.filter(
             user=user, status=MatchQueueStatus.SEARCHING
         ).first()
@@ -224,7 +256,7 @@ class MatchmakingService:
         - total_online: everyone currently online (app foregrounded).
         - compatible_online: online users this person can actually match with
           (same intent, mutual gender compatibility, not self, not already in a
-          chat)."""
+          chat, and not a previous match partner)."""
         total_online = self._presence.online_count()
         online_ids = self._presence.online_ids()
         online_ids.discard(str(user.id))
@@ -250,7 +282,20 @@ class MatchmakingService:
                     ChatStatus.REVEALED,
                 )
             ).values_list("user_id", flat=True)
-            compatible = qs.exclude(id__in=busy_ids).count()
+            # Previous match partners are not matchable again, so they must not
+            # inflate the count either.
+            past_ids = self._chats.past_partner_ids(user)
+            # Age filter (relationship intent): apply the same mutual check as a
+            # real match so the count reflects who this user could actually pair
+            # with. Python-level over the small online set (coarse N+ number).
+            candidates = qs.exclude(id__in=busy_ids)
+            if past_ids:
+                candidates = candidates.exclude(id__in=past_ids)
+            compatible = sum(
+                1
+                for c in candidates
+                if self._age_ok(user, c) and self._age_ok(c, user)
+            )
 
         return {
             "total_online": self._plus_range(total_online),

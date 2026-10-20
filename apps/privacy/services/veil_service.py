@@ -1,8 +1,9 @@
 """VeilService — orchestrates the Veil engine around LeakGuard.
 
 Owns everything the pure scanner cannot: the feature flag + shadow/enforce mode,
-the rolling cross-message digit window (cache), persistence of ``LeakEvent``,
-the per-user strike counter, escalation, and the graduated block message.
+the cross-message window (the sender's last N SENT messages, read from the DB),
+persistence of ``LeakEvent``, the per-user strike counter, escalation, and the
+graduated block message.
 
 ``MessageService`` calls :meth:`inspect_text` for every text message sent during
 the ANONYMOUS phase of a chat.
@@ -14,7 +15,6 @@ import logging
 import random
 from dataclasses import dataclass
 
-from django.core.cache import cache
 from django.db.models import F
 from django.utils import timezone
 
@@ -22,15 +22,13 @@ from apps.configuration.constants import AppConfigKey, FeatureFlagKey
 from apps.privacy import ruleset
 from apps.privacy.constants import (
     DEFAULT_ESCALATE_THRESHOLD,
-    DEFAULT_WINDOW_SECONDS,
-    DIGIT_WINDOW_CACHE_PREFIX,
+    DEFAULT_MESSAGE_WINDOW,
     MAX_ACCUMULATED_DIGITS,
     MAX_WINDOW_CHARS,
-    TEXT_WINDOW_CACHE_PREFIX,
 )
 from apps.privacy.enums import LeakAction, LeakCategory, VeilMode
 from apps.privacy.models import LeakEvent, LeakStrike
-from apps.privacy.services.leakguard import LeakGuard, Verdict
+from apps.privacy.services.leakguard import LeakGuard, Verdict, extract_digits
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +87,11 @@ class VeilService:
     def _mode(self) -> str:
         return str(self._config.get_config(AppConfigKey.VEIL_MODE) or VeilMode.ENFORCE.value)
 
-    def _window_seconds(self) -> int:
+    def _message_window(self) -> int:
+        """Cross-message window size = the sender's last N SENT messages."""
         return int(
-            self._config.get_config(AppConfigKey.VEIL_WINDOW_SECONDS)
-            or DEFAULT_WINDOW_SECONDS
+            self._config.get_config(AppConfigKey.VEIL_MESSAGE_WINDOW)
+            or DEFAULT_MESSAGE_WINDOW
         )
 
     def _escalate_threshold(self) -> int:
@@ -121,19 +120,12 @@ class VeilService:
             return VeilDecision(blocked=False)
 
     def _inspect(self, chat, sender, text: str) -> VeilDecision:
-        dkey = f"{DIGIT_WINDOW_CACHE_PREFIX}{chat.id}:{sender.id}"
-        tkey = f"{TEXT_WINDOW_CACHE_PREFIX}{chat.id}:{sender.id}"
-        prior_digits = cache.get(dkey, "")
-        prior_text = cache.get(tkey, "")
+        prior_text, prior_digits = self._build_window(chat, sender)
         verdict = self._guard.scan(
-            text, prior_digits=prior_digits, prior_text=prior_text
-        )
-        window_seconds = self._window_seconds()
-        # Keep only the tail of the accumulated digits (one phone's worth) and a
-        # short rolling text window for cross-message keyword/phrase leaks.
-        cache.set(dkey, verdict.combined_digits[-MAX_ACCUMULATED_DIGITS:], window_seconds)
-        cache.set(
-            tkey, (prior_text + " " + (text or "")).strip()[-MAX_WINDOW_CHARS:], window_seconds
+            text,
+            prior_digits=prior_digits,
+            prior_text=prior_text,
+            sender_name=getattr(sender, "full_name", "") or "",
         )
 
         if not verdict.blocked:
@@ -155,15 +147,34 @@ class VeilService:
         if action == LeakAction.ESCALATE.value:
             self._escalate(sender, strike.count, verdict)
 
-        # Reset the windows so one block doesn't cascade into the next message.
-        cache.delete(dkey)
-        cache.delete(tkey)
         return VeilDecision(
             blocked=True,
             user_message=self._message_for(verdict, strike.count),
             action=action,
             category=verdict.top_category,
         )
+
+    def _build_window(self, chat, sender) -> tuple[str, str]:
+        """Cross-message window from the sender's last N SENT (persisted) text
+        messages in this chat. A blocked attempt is never persisted, so it cannot
+        enter the window. Returns (prior_text, prior_digits)."""
+        from apps.messaging.enums import MessageType
+        from apps.messaging.models import Message
+
+        texts = list(
+            Message.objects.filter(
+                chat=chat,
+                sender=sender,
+                message_type=MessageType.TEXT,
+                is_deleted=False,
+            )
+            .order_by("-created_at")
+            .values_list("text_content", flat=True)[: self._message_window()]
+        )
+        texts.reverse()  # chronological
+        prior_text = " ".join(t for t in texts if t)[-MAX_WINDOW_CHARS:]
+        prior_digits = extract_digits(prior_text)[-MAX_ACCUMULATED_DIGITS:]
+        return prior_text, prior_digits
 
     # -- internals ----------------------------------------------------------
     def _bump_strike(self, user) -> LeakStrike:
@@ -213,13 +224,19 @@ class VeilService:
         except Exception:  # notifications must never block message handling
             logger.exception("Veil escalation notification failed for user %s", user.id)
 
+    # First-offence, category-specific nudges (gentler + more precise than the
+    # generic ladder). Repeat offences fall through to the graduated ladder.
+    _CATEGORY_TONES = {
+        LeakCategory.SOLICITATION.value: "ask",
+        LeakCategory.MEETING.value: "meet",
+        LeakCategory.SELF_NAME.value: "name",
+    }
+
     def _message_for(self, verdict: Verdict, count: int) -> str:
-        if (
-            count <= 1
-            and verdict.top_category == LeakCategory.SOLICITATION.value
-        ):
-            return random.choice(ruleset.TONES["ask"])
         if count <= 1:
+            tone = self._CATEGORY_TONES.get(verdict.top_category)
+            if tone is not None:
+                return random.choice(ruleset.TONES[tone])
             tone = "gentle"
         elif count == 2:
             tone = "firm"

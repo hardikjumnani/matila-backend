@@ -83,7 +83,7 @@ class DecisionFlowTests(TestCase):
         """Pay one side the prod way: coins for REVEAL, Play verify for the rest."""
         if purpose == PaymentPurpose.REVEAL:
             self.credits.credit(
-                user=user, coin_type="REVEAL", amount=1,
+                user=user, amount=10,
                 reason="ADMIN_ADJUST", idempotency_key=f"seed:{user.id}:{uuid.uuid4().hex}",
             )
             return self.pay.pay_with_coin(
@@ -226,11 +226,11 @@ class DecisionFlowTests(TestCase):
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.REVEAL)
         self._pay(self.boy, PaymentPurpose.REVEAL)
-        # Girl exits before paying → boy gets a reveal coin, chat ends.
+        # Girl exits before paying → boy is refunded the reveal coin cost, chat ends.
         self._decide(self.girl, DecisionChoice.EXIT)
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 1)
-        self.assertEqual(self.credits.get_balances(self.girl)["reveal_coins"], 0)
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 10)
+        self.assertEqual(self.credits.get_balances(self.girl)["coins"], 0)
 
     # -- safe reveal --------------------------------------------------------
 
@@ -271,8 +271,8 @@ class DecisionFlowTests(TestCase):
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
         self.assertEqual(self.chat.end_reason, EndReason.SAFE_REJECT)
         # No coins for either — the boy was already seen (forfeit).
-        self.assertEqual(self.credits.get_balances(self.girl)["safe_reveal_coins"], 0)
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 0)
+        self.assertEqual(self.credits.get_balances(self.girl)["coins"], 0)
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 0)
 
     def test_boy_cannot_make_safe_decision(self) -> None:
         self._reach_safe_decision()
@@ -290,8 +290,8 @@ class DecisionFlowTests(TestCase):
         self._pay(self.girl, PaymentPurpose.SAFE_REVEAL)  # girl pays first
         self._decide(self.boy, DecisionChoice.EXIT)  # boy bails
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
-        # Girl gets a SAFE reveal coin (she paid the safe price).
-        self.assertEqual(self.credits.get_balances(self.girl)["safe_reveal_coins"], 1)
+        # Girl is refunded the female safe-reveal coin cost (she paid the safe side).
+        self.assertEqual(self.credits.get_balances(self.girl)["coins"], 16)
 
     # -- extend -------------------------------------------------------------
 
@@ -328,24 +328,19 @@ class DecisionFlowTests(TestCase):
         )
         self.reveal.auto_exit_if_stale(self._refresh())
         self.assertEqual(self._refresh().status, ChatStatus.ENDED)
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 1)
+        # Lone extension payer is refunded the extend coin cost.
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 6)
 
     # -- coins --------------------------------------------------------------
 
     def test_pay_with_coin_reveals(self) -> None:
         self.credits.credit(
-            user=self.boy,
-            coin_type="REVEAL",
-            amount=1,
-            reason="ADMIN_ADJUST",
-            idempotency_key="seed-boy",
+            user=self.boy, amount=10,
+            reason="ADMIN_ADJUST", idempotency_key="seed-boy",
         )
         self.credits.credit(
-            user=self.girl,
-            coin_type="REVEAL",
-            amount=1,
-            reason="ADMIN_ADJUST",
-            idempotency_key="seed-girl",
+            user=self.girl, amount=10,
+            reason="ADMIN_ADJUST", idempotency_key="seed-girl",
         )
         self._make_eligible()
         self._decide(self.boy, DecisionChoice.REVEAL)
@@ -357,7 +352,7 @@ class DecisionFlowTests(TestCase):
             user=self.girl, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
         self.assertEqual(self._refresh().status, ChatStatus.REVEALED)
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 0)
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 0)
 
     def test_pay_with_coin_insufficient_rejected(self) -> None:
         self._make_eligible()
@@ -367,3 +362,64 @@ class DecisionFlowTests(TestCase):
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
         self.assertEqual(result.error_code, "INSUFFICIENT_COINS")
+
+
+@override_settings(ENDGAME_PAYMENT_BYPASS=True)
+class EndgamePaymentBypassTests(TestCase):
+    """TEMPORARY dev/test switch (FE bridge [00054]): a mutual payable decision
+    completes WITHOUT any coins or Play purchase."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        notif = mock.MagicMock()
+        self.chats = ChatService(notification_service=notif)
+        self.reveal = RevealService(chat_service=self.chats, notification_service=notif)
+        self.boy = _user(Gender.MALE)
+        self.girl = _user(Gender.FEMALE)
+        self.chat = self.chats.create_chat(self.boy, self.girl).data
+
+    def _eligible(self) -> None:
+        Chat.objects.filter(id=self.chat.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
+        self.chat.refresh_from_db()
+
+    def _decide(self, user, choice):
+        return self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=user, choice=choice
+        )
+
+    def test_mutual_reveal_completes_without_payment(self) -> None:
+        self._eligible()
+        self._decide(self.boy, DecisionChoice.REVEAL)
+        self._decide(self.girl, DecisionChoice.REVEAL)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.REVEALED)
+
+    def test_mutual_extend_completes_without_payment(self) -> None:
+        self._eligible()
+        self.chats.expire_chat(str(self.chat.id))
+        self._decide(self.boy, DecisionChoice.EXTEND)
+        self._decide(self.girl, DecisionChoice.EXTEND)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.EXTENDED)
+
+    def test_safe_reveal_enters_safe_decision_without_payment(self) -> None:
+        self._eligible()
+        self._decide(self.boy, DecisionChoice.REVEAL)
+        self._decide(self.girl, DecisionChoice.SAFE_REVEAL)
+        round_ = DecisionRound.objects.filter(chat=self.chat).latest("created_at")
+        self.assertEqual(round_.final_call, FinalCall.SAFE_REVEAL)
+        self.assertEqual(round_.phase, DecisionRoundPhase.SAFE_DECISION)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.ACTIVE)  # girl still decides
+
+    def test_disabled_flag_keeps_payment_gate(self) -> None:
+        with override_settings(ENDGAME_PAYMENT_BYPASS=False):
+            self._eligible()
+            self._decide(self.boy, DecisionChoice.REVEAL)
+            self._decide(self.girl, DecisionChoice.REVEAL)
+            round_ = DecisionRound.objects.filter(chat=self.chat).latest("created_at")
+            self.assertEqual(round_.phase, DecisionRoundPhase.PAYMENT)
+            self.chat.refresh_from_db()
+            self.assertEqual(self.chat.status, ChatStatus.ACTIVE)

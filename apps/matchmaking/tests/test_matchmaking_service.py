@@ -9,6 +9,8 @@ from unittest import mock
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.chats.enums import ChatStatus
+from apps.chats.models import Chat, ChatParticipant
 from apps.chats.services.chat_service import ChatService
 from apps.matchmaking.enums import MatchQueueStatus
 from apps.matchmaking.models import MatchQueue
@@ -99,12 +101,202 @@ class MatchmakingServiceTests(TestCase):
         self.service.join(a)
         self.assertTrue(self.service.join(b).data.matched)
 
+    # -- Age-preference hard filter (relationship intent) -------------------
+
+    @staticmethod
+    def _dob_for_age(years: int):
+        from datetime import date
+
+        today = timezone.now().date()
+        # Born Jan 1 => this year's birthday has passed => exact age == years.
+        return date(today.year - years, 1, 1)
+
+    def _set_age(self, user: User, age: int) -> None:
+        user.date_of_birth = self._dob_for_age(age)
+        user.save(update_fields=["date_of_birth"])
+
+    def _set_age_pref(self, user: User, lo: int, hi: int) -> None:
+        user.age_preference_enabled = True
+        user.age_preference_min = lo
+        user.age_preference_max = hi
+        user.save(
+            update_fields=[
+                "age_preference_enabled",
+                "age_preference_min",
+                "age_preference_max",
+            ]
+        )
+
+    def test_age_in_range_matches(self) -> None:
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age(b, 18)
+        self._set_age_pref(a, 18, 19)  # A wants 18-19; B is 18 -> in range
+        self.service.join(a)
+        self.assertTrue(self.service.join(b).data.matched)
+
+    def test_age_above_range_excluded(self) -> None:
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age(b, 20)
+        self._set_age_pref(a, 18, 19)  # B is 20 -> out of range
+        self.service.join(a)
+        self.assertFalse(self.service.join(b).data.matched)
+
+    def test_age_preference_off_imposes_no_restriction(self) -> None:
+        # A has no preference (default off); B is any age -> A does not filter.
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age(b, 29)
+        self.service.join(a)
+        self.assertTrue(self.service.join(b).data.matched)
+
+    def test_other_sides_filter_still_applies(self) -> None:
+        # A has no restriction, but B requires 18-19 and A is 25 -> B's filter blocks.
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age(b, 18)
+        self._set_age_pref(b, 18, 19)
+        self.service.join(a)
+        self.assertFalse(self.service.join(b).data.matched)
+
+    def test_unknown_age_excluded_by_active_filter(self) -> None:
+        # B has no DOB; A's active filter cannot be satisfied by an unknown age.
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age_pref(a, 18, 30)
+        # b.date_of_birth stays None
+        self.service.join(a)
+        self.assertFalse(self.service.join(b).data.matched)
+
+    def test_age_filter_ignored_for_non_relationship(self) -> None:
+        # Age preference is relationship-only: a CASUAL user with it enabled still
+        # matches regardless of age.
+        a = _eligible(Gender.MALE, Intent.CASUAL, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.CASUAL, [Gender.MALE])
+        self._set_age(a, 25)
+        self._set_age(b, 29)
+        self._set_age_pref(a, 18, 19)  # would exclude B at 29 if applied
+        self.service.join(a)
+        self.assertTrue(self.service.join(b).data.matched)
+
+    # -- No re-matching a previous partner ----------------------------------
+
+    def _match_then_end(self, a: User, b: User) -> Chat:
+        """Match a and b into a chat, then end it so the slot is freed."""
+        self.service.join(a)
+        self.service.join(b)
+        chat = Chat.objects.filter(participants__user=a).first()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.ENDED)
+        return chat
+
+    def test_does_not_rematch_previous_partner(self) -> None:
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._match_then_end(a, b)  # they have shared a chat before
+        # Both requeue; they are each other's only candidate -> no match.
+        self.service.join(b)
+        result = self.service.join(a)
+        self.assertFalse(result.data.matched)
+        self.assertEqual(
+            MatchQueue.objects.filter(status=MatchQueueStatus.SEARCHING).count(), 2
+        )
+
+    def test_matches_new_partner_not_past_partner(self) -> None:
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        past = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self._match_then_end(a, past)  # a and past chatted before
+        # A fresh compatible user is also waiting alongside the past partner.
+        fresh = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self.service.join(past)
+        self.service.join(fresh)
+        result = self.service.join(a)
+        self.assertTrue(result.data.matched)
+        partner_ids = set(
+            ChatParticipant.objects.filter(chat=result.data.chat)
+            .exclude(user=a)
+            .values_list("user_id", flat=True)
+        )
+        self.assertEqual(partner_ids, {fresh.id})  # fresh, never the past partner
+
+    def test_lobby_stats_excludes_past_partner(self) -> None:
+        me = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        online = {str(me.id)}
+        for _ in range(9):  # 9 fresh compatible users
+            online.add(
+                str(_eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE]).id)
+            )
+        # A 10th compatible user, but already matched with me before -> excluded.
+        past = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        ChatService(notification_service=mock.MagicMock()).create_chat(me, past)
+        Chat.objects.filter(participants__user=me).update(status=ChatStatus.ENDED)
+        online.add(str(past.id))
+
+        presence = mock.MagicMock()
+        presence.online_ids.return_value = set(online)
+        presence.online_count.return_value = len(online)
+        svc = MatchmakingService(
+            chat_service=ChatService(notification_service=mock.MagicMock()),
+            notification_service=mock.MagicMock(),
+            presence_service=presence,
+        )
+        stats = svc.get_lobby_stats(me)
+        # 9 fresh count; the past partner is excluded, so it stays 0+ not 10+.
+        self.assertEqual(stats["compatible_online"], {"floor": 0, "label": "0+"})
+
     def test_cannot_join_with_active_chat(self) -> None:
         a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
         b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
         self.service.join(a)
         self.service.join(b)  # a and b now in a chat
         self.assertEqual(self.service.join(a).error_code, "CONFLICT")
+
+    def _matched_pair_chat(self):
+        a = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])
+        b = _eligible(Gender.FEMALE, Intent.RELATIONSHIP, [Gender.MALE])
+        self.service.join(a)
+        self.service.join(b)
+        chat = Chat.objects.filter(participants__user=a).first()
+        return a, chat
+
+    def test_revealed_chat_frees_the_match_slot(self) -> None:
+        # Rule (AI_BRIDGE [00055]): a REVEALED chat must NOT block a new match.
+        a, chat = self._matched_pair_chat()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.REVEALED)
+        self.assertTrue(self.service.join(a).success)
+
+    def test_ended_chat_frees_the_match_slot(self) -> None:
+        a, chat = self._matched_pair_chat()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.ENDED)
+        self.assertTrue(self.service.join(a).success)
+
+    def test_expired_chat_still_blocks_match(self) -> None:
+        # EXPIRED means a decision round is still pending -> blocks a new match.
+        a, chat = self._matched_pair_chat()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.EXPIRED)
+        self.assertEqual(self.service.join(a).error_code, "CONFLICT")
+
+    def test_status_revealed_chat_is_not_matched(self) -> None:
+        # [00056]: a revealed chat must not read as MATCHED in matchmaking status.
+        a, chat = self._matched_pair_chat()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.REVEALED)
+        self.assertEqual(self.service.get_status(a)["state"], "IDLE")
+
+    def test_status_active_chat_is_matched(self) -> None:
+        a, chat = self._matched_pair_chat()
+        status = self.service.get_status(a)
+        self.assertEqual(status["state"], "MATCHED")
+        self.assertEqual(status["chat_id"], str(chat.id))
+
+    def test_status_expired_chat_is_matched(self) -> None:
+        a, chat = self._matched_pair_chat()
+        Chat.objects.filter(id=chat.id).update(status=ChatStatus.EXPIRED)
+        self.assertEqual(self.service.get_status(a)["state"], "MATCHED")
 
     def test_leave_cancels_entry(self) -> None:
         user = _eligible(Gender.MALE, Intent.RELATIONSHIP, [Gender.FEMALE])

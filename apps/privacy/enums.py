@@ -20,6 +20,8 @@ class LeakCategory(models.TextChoices):
     PLATFORM = "PLATFORM", "Platform mention"
     STEERING = "STEERING", "Off-app steering"
     SOLICITATION = "SOLICITATION", "Soliciting contact"
+    MEETING = "MEETING", "Offline meeting coordination"
+    SELF_NAME = "SELF_NAME", "Self-identifying name"
 
 
 class LeakSeverity(models.TextChoices):

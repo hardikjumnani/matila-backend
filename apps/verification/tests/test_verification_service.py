@@ -68,7 +68,43 @@ class VerificationServiceTests(TestCase):
         self.assertTrue(result.success)
         draft = VerificationRequest.objects.get(user=self.user)
         self.assertEqual(draft.attempt_number, 1)
-        self.assertEqual(draft.gesture_type, result.data)
+        # result.data is now the resolved {code, label, emoji}; the stored
+        # gesture_type is the code.
+        self.assertEqual(draft.gesture_type, result.data["code"])
+        self.assertTrue(result.data["label"])
+        self.assertTrue(result.data["emoji"])
+
+    def test_generate_gesture_is_stable_within_attempt(self) -> None:
+        # Two requests on the same in-progress draft must return the same gesture
+        # and must not re-roll (a re-roll would strand a selfie already taken for
+        # the previous gesture).
+        fixed = {"code": "THUMBS_UP", "label": "Thumbs up", "emoji": "\U0001f44d"}
+        with mock.patch(
+            "apps.verification.services.verification_service.secrets.choice",
+            return_value=fixed,
+        ) as choice:
+            first = self.service.generate_gesture(self.user)
+            second = self.service.generate_gesture(self.user)
+        self.assertTrue(first.success and second.success)
+        self.assertEqual(first.data["code"], "THUMBS_UP")
+        self.assertEqual(second.data["code"], "THUMBS_UP")
+        self.assertEqual(choice.call_count, 1)  # rolled once, not re-rolled
+        self.assertEqual(
+            VerificationRequest.objects.filter(user=self.user).count(), 1
+        )
+
+    def test_new_attempt_assigns_fresh_gesture(self) -> None:
+        # A resubmission opens a new draft, which gets its own assigned gesture.
+        submitted = self._submitted()
+        self.service.request_resubmission(request_id=str(submitted.id), admin_id="1")
+        self.user.refresh_from_db()
+        result = self.service.generate_gesture(self.user)
+        self.assertTrue(result.success)
+        draft2 = self.service.get_latest_request(self.user)
+        self.assertEqual(draft2.attempt_number, 2)
+        self.assertIsNone(draft2.submitted_at)
+        self.assertTrue(draft2.gesture_type)
+        self.assertEqual(draft2.gesture_type, result.data["code"])
 
     def test_cannot_start_when_already_approved(self) -> None:
         self.user.verification_status = VerificationStatus.APPROVED

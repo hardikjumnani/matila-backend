@@ -49,5 +49,13 @@ CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=boo
 # default in development; overridable.
 PAYMENTS_DEV_BYPASS = config("PAYMENTS_DEV_BYPASS", default=True, cast=bool)
 
+# DEV ONLY, TEMPORARY (FE bridge [00054]): complete reveal / extend / safe-reveal on
+# a mutual decision without any payment or coins. Turned OFF per FE bridge [00060]
+# (task 7): the endgame now shows the real final-decision + pay step, and the FE
+# dev build drives it via verify-purchase with a dummy token (accepted by
+# PAYMENTS_DEV_BYPASS below), so this auto-satisfy shortcut is no longer needed.
+# Default stays overridable by env; production refuses to boot with this on.
+ENDGAME_PAYMENT_BYPASS = config("ENDGAME_PAYMENT_BYPASS", default=False, cast=bool)
+
 # Accept "dev:<email>" bearer tokens locally (admin panel / harness). Dev only.
 AUTH_DEV_BYPASS = config("AUTH_DEV_BYPASS", default=True, cast=bool)

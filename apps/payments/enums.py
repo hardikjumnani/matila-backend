@@ -30,16 +30,16 @@ class PaymentInitiatedFrom(models.TextChoices):
 
 
 class CoinType(models.TextChoices):
-    """Wallet currencies. REVEAL coins are sold in the store and spent on a
-    standard-reveal side (or the boy's safe-reveal side). SAFE_REVEAL coins are
-    girl-only, never sold, and spent on the girl's safe-reveal side."""
+    """Single unified wallet currency. One Coin is spent on any paid action
+    (reveal, safe reveal, extend) at its fixed coin cost, and is sold in the store
+    as coin packs. (Historical ledger rows may still carry the retired REVEAL /
+    SAFE_REVEAL values; only COIN is written going forward.)"""
 
-    REVEAL = "REVEAL", "Reveal coin"
-    SAFE_REVEAL = "SAFE_REVEAL", "Safe reveal coin"
+    COIN = "COIN", "Coin"
 
 
 class CoinLedgerReason(models.TextChoices):
-    BUNDLE_PURCHASE = "BUNDLE_PURCHASE", "Bundle purchase"
+    BUNDLE_PURCHASE = "BUNDLE_PURCHASE", "Coin pack purchase"
     CANCELLATION_CREDIT = "CANCELLATION_CREDIT", "Cancellation credit"
-    REVEAL_CONSUME = "REVEAL_CONSUME", "Reveal consume"
+    ACTION_CONSUME = "ACTION_CONSUME", "Action consume"
     ADMIN_ADJUST = "ADMIN_ADJUST", "Admin adjust"

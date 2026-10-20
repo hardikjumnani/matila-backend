@@ -64,11 +64,11 @@ class HarnessCommandTests(TestCase):
             "--chat",
             str(chat.id),
             "--text",
-            "hello from the partner",
+            "hello there how is it going",
         )
         message = Message.objects.get(chat=chat)
         self.assertEqual(message.sender_id, partner.id)
-        self.assertEqual(message.text_content, "hello from the partner")
+        self.assertEqual(message.text_content, "hello there how is it going")
 
     @DEV
     def test_approve_verification(self) -> None:

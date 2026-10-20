@@ -192,15 +192,23 @@ class MessageService:
     def create_system_message(
         self, *, chat, content: str, metadata: dict | None = None
     ) -> Message:
-        """Create a SYSTEM message. System messages do not count toward the
-        exchanged-message total that governs reveal eligibility."""
-        return Message.objects.create(
+        """Create a SYSTEM message and broadcast it live, like a normal send.
+
+        System messages do not count toward the exchanged-message total that
+        governs reveal eligibility, and are excluded from the unread count and
+        the last-message preview (see the chat serializer). They ARE part of the
+        message stream/history, so the client renders them (e.g. an activity
+        divider on reveal / extend). ``message.new`` is broadcast post-commit so
+        both participants see them in real time, exactly once."""
+        message = Message.objects.create(
             chat=chat,
             sender=None,
             message_type=MessageType.SYSTEM,
             text_content=content,
             metadata=metadata or {},
         )
+        self._broadcast_new_message(message)
+        return message
 
     # -- View-once media ----------------------------------------------------
 

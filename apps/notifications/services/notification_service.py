@@ -13,9 +13,7 @@ Step 8 delivery pipeline can pick them up once that gap is resolved.
 
 from __future__ import annotations
 
-import atexit
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
@@ -29,16 +27,6 @@ from apps.notifications.models import Notification
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
-
-# Celery's first task-publish on any thread pays a one-time cold cost (app
-# finalize + per-thread broker connection) of several seconds. On an ASGI server
-# that runs sync views in a thread pool, paying this on the request thread makes
-# the first action on each worker thread hang. Route every enqueue through one
-# long-lived publisher thread instead: it warms once, stays hot, and request
-# threads hand off and return immediately. Push is best-effort, so a dropped
-# enqueue is recoverable from the notification's PENDING push_status.
-_push_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="push-enqueue")
-atexit.register(_push_executor.shutdown, wait=False)
 
 
 class NotificationService:
@@ -85,14 +73,9 @@ class NotificationService:
         return notification
 
     def _enqueue_push(self, notification_id: str) -> None:
-        """Enqueue FCM delivery after commit; best-effort (never blocks creation).
+        """Enqueue FCM delivery after commit; best-effort (never blocks creation)."""
 
-        The actual broker publish runs on the shared single-thread executor so the
-        caller's thread (often an ASGI request thread) never waits on Celery's
-        connection setup.
-        """
-
-        def _publish() -> None:
+        def _dispatch() -> None:
             try:
                 from apps.notifications.tasks import send_push_notification
 
@@ -103,9 +86,7 @@ class NotificationService:
                     "Could not enqueue push for %s: %s", notification_id, exc
                 )
 
-        # After commit, hand the publish off to the warm publisher thread and
-        # return at once (submit is non-blocking).
-        transaction.on_commit(lambda: _push_executor.submit(_publish))
+        transaction.on_commit(_dispatch)
 
     def for_user(self, user: User) -> QuerySet[Notification]:
         """Return a user's non-expired notifications, newest first."""

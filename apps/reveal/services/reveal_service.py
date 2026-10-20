@@ -21,7 +21,7 @@ from apps.chats.enums import ChatStatus, EndReason
 from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
 from apps.configuration.constants import FeatureFlagKey
-from apps.payments.enums import CoinLedgerReason, CoinType
+from apps.payments.enums import CoinLedgerReason
 from apps.reveal.constants import (
     REVEAL_ELIGIBILITY_MESSAGES_PER_USER,
     REVEAL_ELIGIBILITY_MINUTES,
@@ -272,6 +272,16 @@ class RevealService:
                 round_.save(
                     update_fields=["final_call", "phase", "status_changed_at"]
                 )
+                # TEMPORARY, DEV/TEST ONLY (FE bridge [00054]): with the endgame
+                # payment bypass on, skip the payment gate so a mutual payable
+                # decision executes immediately (reveal / extend / safe reveal)
+                # without coins or a Play purchase. Production refuses to boot with
+                # this flag on (config/settings/production.py).
+                if settings.ENDGAME_PAYMENT_BYPASS and round_.final_call in _PAYABLE:
+                    round_.decisions.update(
+                        paid_at=timezone.now(), paid_with_coin=False
+                    )
+                    self._execute_final_call(round_, chat)
 
         # Post-commit signalling.
         if both_chosen:
@@ -528,25 +538,32 @@ class RevealService:
         transaction.on_commit(lambda: self._notify_ended(chat.id, reason="auto_exit"))
         return True
 
+    _FINAL_TO_PURPOSE = {
+        FinalCall.REVEAL: "REVEAL",
+        FinalCall.EXTEND: "CHAT_EXTENSION",
+        FinalCall.SAFE_REVEAL: "SAFE_REVEAL",
+    }
+
     def _credit_unmatched_payments(self, round_: DecisionRound) -> None:
-        """Credit coins for any side that paid but whose action won't execute."""
+        """Refund coins for any side that paid but whose action won't execute. Each
+        side is refunded the coin cost of its own action (per gender for safe
+        reveal), regardless of whether it paid by coin or cash."""
+        purpose = self._FINAL_TO_PURPOSE.get(round_.final_call)
+        if purpose is None:
+            return
         for pd in round_.decisions.select_related("user").all():
             if pd.paid_at is None:
                 continue
-            coin_type = self._cancellation_coin_type(round_, pd.user)
+            amount = self._config.get_coin_cost(
+                purpose, getattr(pd.user, "gender", None)
+            )
             self._credits.credit(
                 user=pd.user,
-                coin_type=coin_type,
-                amount=1,
+                amount=amount,
                 reason=CoinLedgerReason.CANCELLATION_CREDIT,
                 idempotency_key=f"cancel:{round_.id}:{pd.user_id}",
                 chat=round_.chat,
             )
-
-    def _cancellation_coin_type(self, round_: DecisionRound, user: User) -> str:
-        if round_.final_call == FinalCall.SAFE_REVEAL and user.gender == Gender.FEMALE:
-            return CoinType.SAFE_REVEAL
-        return CoinType.REVEAL
 
     # -- State read (reconnection) ------------------------------------------
 

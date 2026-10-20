@@ -98,14 +98,28 @@ class ConfigurationService:
     def get_safe_reveal_male_price_paise(self) -> int:
         return int(self.get_config(AppConfigKey.SAFE_REVEAL_MALE_PRICE_PAISE))
 
-    def get_standard_reveal_bundles(self) -> list[dict]:
-        return list(self.get_config(AppConfigKey.STANDARD_REVEAL_BUNDLES) or [])
+    def get_coin_packs(self) -> list[dict]:
+        return list(self.get_config(AppConfigKey.COIN_PACKS) or [])
 
-    def get_bundle_by_sku(self, sku: str) -> dict | None:
-        for bundle in self.get_standard_reveal_bundles():
-            if bundle.get("sku") == sku:
-                return bundle
+    def get_pack_by_sku(self, sku: str) -> dict | None:
+        for pack in self.get_coin_packs():
+            if pack.get("sku") == sku:
+                return pack
         return None
+
+    def get_coin_cost(self, purpose: str, gender: str | None = None) -> int:
+        """Coin cost of a paid action side (unified Coin). ``purpose`` is a
+        PaymentPurpose value string; ``gender`` is required for SAFE_REVEAL."""
+        p = str(purpose)
+        if p == "REVEAL":
+            return int(self.get_config(AppConfigKey.COIN_COST_REVEAL))
+        if p == "CHAT_EXTENSION":
+            return int(self.get_config(AppConfigKey.COIN_COST_EXTEND))
+        if p == "SAFE_REVEAL":
+            if str(gender) == "FEMALE":
+                return int(self.get_config(AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE))
+            return int(self.get_config(AppConfigKey.COIN_COST_SAFE_REVEAL_MALE))
+        raise ValueError(f"no coin cost for purpose {purpose!r}")
 
     def get_matchmaking_timeout_seconds(self) -> int:
         return int(self.get_config(AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS))
@@ -113,8 +127,25 @@ class ConfigurationService:
     def get_chat_expiry_warning_minutes(self) -> int:
         return int(self.get_config(AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES))
 
-    def get_gesture_pool(self) -> list[str]:
+    def get_gesture_pool(self) -> list[dict]:
+        """The verification gesture pool: a list of {code, label, emoji} objects."""
         return list(self.get_config(AppConfigKey.GESTURE_POOL) or [])
+
+    def get_gesture(self, code: str) -> dict | None:
+        """Resolve a stored gesture code to its {code, label, emoji}. For a code no
+        longer in the pool (e.g. a historical gesture), return a graceful fallback
+        with a humanised label and no emoji, so old verification attempts still
+        render. Returns None only for an empty/missing code."""
+        if not code:
+            return None
+        for entry in self.get_gesture_pool():
+            if isinstance(entry, dict) and entry.get("code") == code:
+                return {
+                    "code": code,
+                    "label": entry.get("label") or code,
+                    "emoji": entry.get("emoji") or "",
+                }
+        return {"code": code, "label": code.replace("_", " ").title(), "emoji": ""}
 
     def get_rating_questionnaire(self) -> dict[str, Any]:
         return dict(self.get_config(AppConfigKey.RATING_QUESTIONNAIRE) or {})
@@ -135,6 +166,15 @@ class ConfigurationService:
         merged.update({row.key: row.value for row in FeatureFlag.objects.all()})
         return merged
 
+    @staticmethod
+    def _age_bounds() -> dict[str, int]:
+        """DOB-picker / age-preference-range bounds for the client (see the users
+        domain constants). Not runtime-editable; constants, exposed here so the
+        client never hardcodes them."""
+        from apps.users.constants import MAX_AGE, MIN_AGE
+
+        return {"min_age": MIN_AGE, "max_age": MAX_AGE}
+
     def get_runtime_config(self) -> dict[str, Any]:
         """Assemble the complete runtime configuration for the /config endpoint."""
         return {
@@ -146,7 +186,17 @@ class ConfigurationService:
                     self.get_safe_reveal_female_price_paise()
                 ),
                 "safe_reveal_male_price_paise": self.get_safe_reveal_male_price_paise(),
+                # Unified-coin costs per action side.
+                "coin_cost_reveal": int(self.get_config(AppConfigKey.COIN_COST_REVEAL)),
+                "coin_cost_extend": int(self.get_config(AppConfigKey.COIN_COST_EXTEND)),
+                "coin_cost_safe_reveal_female": int(
+                    self.get_config(AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE)
+                ),
+                "coin_cost_safe_reveal_male": int(
+                    self.get_config(AppConfigKey.COIN_COST_SAFE_REVEAL_MALE)
+                ),
             },
+            "age": self._age_bounds(),
             "rating_questionnaire": self.get_rating_questionnaire(),
             "faq": self.get_config(AppConfigKey.FAQ_CONTENT),
             "community_guidelines": self.get_config(AppConfigKey.COMMUNITY_GUIDELINES),

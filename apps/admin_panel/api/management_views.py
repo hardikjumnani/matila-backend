@@ -161,11 +161,21 @@ class AdminAppConfigUpdateView(AdminAPIView):
 
     @extend_schema(request=SetValueSerializer, responses=AppConfigSerializer)
     def put(self, request: Request, key: str) -> Response:
+        from apps.configuration.validators import (
+            ConfigValidationError,
+            validate_app_config,
+        )
+
         serializer = SetValueSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        value = serializer.validated_data["value"]
+        try:
+            validate_app_config(key, value)
+        except ConfigValidationError as exc:
+            return envelope_error("VALIDATION_ERROR", str(exc), 400)
         entry = ConfigurationService().set_config(
             key=key,
-            value=serializer.validated_data["value"],
+            value=value,
             updated_by=request.user,
             admin_id=str(request.user.id),
             description=serializer.validated_data.get("description"),

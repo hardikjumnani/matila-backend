@@ -91,7 +91,7 @@ class PaymentServiceTests(TestCase):
         self._reach_safe_payment()
         result = self._verify(self.boy, "tok_b", "safe_reveal_male")
         self.assertTrue(result.success)
-        self.assertEqual(result.data.amount_in_paise, 2900)
+        self.assertEqual(result.data.amount_in_paise, 5000)
         self.assertTrue(self.reveal.has_paid(self.chat, self.boy))
 
     def test_verify_purchase_idempotent_on_token(self) -> None:
@@ -119,22 +119,22 @@ class PaymentServiceTests(TestCase):
 
     def test_purchase_bundle_grants_coins(self) -> None:
         result = self.service.purchase_bundle(
-            user=self.boy, product_id="standard_reveal_3",
+            user=self.boy, product_id="coin_pack_30",
             purchase_token="tok_" + uuid.uuid4().hex,
         )
         self.assertTrue(result.success)
-        self.assertEqual(result.data["coins_added"], 3)
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 3)
+        self.assertEqual(result.data["coins_added"], 30)
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 30)
 
     def test_purchase_bundle_idempotent_on_token(self) -> None:
         token = "tok_" + uuid.uuid4().hex
         self.service.purchase_bundle(
-            user=self.boy, product_id="standard_reveal_5", purchase_token=token
+            user=self.boy, product_id="coin_pack_50", purchase_token=token
         )
         self.service.purchase_bundle(
-            user=self.boy, product_id="standard_reveal_5", purchase_token=token
+            user=self.boy, product_id="coin_pack_50", purchase_token=token
         )
-        self.assertEqual(self.credits.get_balances(self.boy)["reveal_coins"], 5)
+        self.assertEqual(self.credits.get_balances(self.boy)["coins"], 50)
 
     def test_purchase_unknown_product_rejected(self) -> None:
         result = self.service.purchase_bundle(
@@ -145,24 +145,41 @@ class PaymentServiceTests(TestCase):
     # -- pay with coin ------------------------------------------------------
 
     def test_pay_with_coin_spends_balance(self) -> None:
+        # Reveal costs 10 coins; seed exactly that and expect a zero balance after.
         self.credits.credit(
-            user=self.boy, coin_type="REVEAL", amount=1,
-            reason="ADMIN_ADJUST", idempotency_key="seed",
+            user=self.boy, amount=10, reason="ADMIN_ADJUST", idempotency_key="seed",
         )
         self._reach_reveal_payment()
         result = self.service.pay_with_coin(
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
         self.assertTrue(result.success)
-        self.assertEqual(result.data["balances"]["reveal_coins"], 0)
+        self.assertEqual(result.data["balances"]["coins"], 0)
         self.assertTrue(self.reveal.has_paid(self.chat, self.boy))
 
     def test_pay_with_coin_requires_active_round(self) -> None:
         self.credits.credit(
-            user=self.boy, coin_type="REVEAL", amount=1,
-            reason="ADMIN_ADJUST", idempotency_key="seed",
+            user=self.boy, amount=10, reason="ADMIN_ADJUST", idempotency_key="seed",
         )
         result = self.service.pay_with_coin(
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
         )
         self.assertEqual(result.error_code, "NO_ACTIVE_PAYMENT")
+
+    # -- has_held_coins flag ------------------------------------------------
+
+    def test_has_held_coins_false_until_first_credit(self) -> None:
+        self.assertFalse(self.credits.get_balances(self.boy)["has_held_coins"])
+        self.credits.credit(
+            user=self.boy, amount=10, reason="ADMIN_ADJUST", idempotency_key="k1",
+        )
+        self.assertTrue(self.credits.get_balances(self.boy)["has_held_coins"])
+
+    def test_has_held_coins_sticky_after_drain(self) -> None:
+        self.credits.credit(
+            user=self.boy, amount=10, reason="ADMIN_ADJUST", idempotency_key="k2",
+        )
+        self.credits.spend(user=self.boy, amount=10, idempotency_key="s1")
+        bal = self.credits.get_balances(self.boy)
+        self.assertEqual(bal["coins"], 0)
+        self.assertTrue(bal["has_held_coins"])  # stays true after returning to 0

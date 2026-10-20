@@ -56,25 +56,27 @@ class PaymentApiTests(TestCase):
         resp = _client(self.boy).get("/api/v1/store/catalog")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()["data"]
-        self.assertEqual(len(data["standard_reveal_bundles"]), 4)
-        self.assertEqual(data["safe_reveal"]["female_price_paise"], 6900)
+        self.assertEqual(len(data["coin_packs"]), 4)
+        self.assertEqual(data["actions"]["safe_reveal_female"]["price_paise"], 10000)
+        self.assertEqual(data["actions"]["reveal"]["coins"], 10)
 
     def test_wallet_starts_empty(self) -> None:
         resp = _client(self.boy).get("/api/v1/wallet")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["data"]["reveal_coins"], 0)
+        self.assertEqual(resp.json()["data"]["coins"], 0)
+        self.assertFalse(resp.json()["data"]["has_held_coins"])
 
     def test_store_purchase_grants_coins(self) -> None:
         with mock.patch(_VERIFY_PLAY, side_effect=_play_stub):
             resp = _client(self.boy).post(
                 "/api/v1/store/purchase",
-                {"product_id": "standard_reveal_5", "purchase_token": "tok1"},
+                {"product_id": "coin_pack_50", "purchase_token": "tok1"},
                 format="json",
             )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.json()["data"]["coins_added"], 5)
+        self.assertEqual(resp.json()["data"]["coins_added"], 50)
         wallet = _client(self.boy).get("/api/v1/wallet").json()
-        self.assertEqual(wallet["data"]["reveal_coins"], 5)
+        self.assertEqual(wallet["data"]["coins"], 50)
 
     @override_settings(PAYMENTS_DEV_BYPASS=True)
     def test_verify_purchase_endpoint(self) -> None:
@@ -96,13 +98,13 @@ class PaymentApiTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.json()["data"]["amount_in_paise"], 2900)
+        self.assertEqual(resp.json()["data"]["amount_in_paise"], 5000)
 
     def test_pay_with_coin_endpoint(self) -> None:
         from apps.payments.services.credit_service import CreditService
 
         CreditService().credit(
-            user=self.boy, coin_type="REVEAL", amount=1,
+            user=self.boy, amount=10,
             reason="ADMIN_ADJUST", idempotency_key="seed",
         )
         self.reveal.submit_decision(
@@ -117,4 +119,4 @@ class PaymentApiTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["data"]["balances"]["reveal_coins"], 0)
+        self.assertEqual(resp.json()["data"]["balances"]["coins"], 0)

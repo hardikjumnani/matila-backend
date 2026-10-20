@@ -44,3 +44,11 @@ django-cors-headers==4.6.0
 
 # API schema / documentation
 drf-spectacular==0.28.0
+
+# Privacy / anti-leakage engine (Veil). Deterministic, no AI, no external API.
+# phonenumbers: libphonenumber port for accurate phone detection (intl + fewer
+#   false positives than a bare regex). pyahocorasick: C multi-pattern matcher
+#   so the multilingual keyword dictionaries match in one O(text) pass,
+#   independent of dictionary size.
+phonenumbers==9.0.41
+pyahocorasick==2.3.1

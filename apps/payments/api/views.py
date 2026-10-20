@@ -91,7 +91,7 @@ class ChatPaymentStatusView(APIView):
 
 
 class StoreCatalogView(APIView):
-    """GET /store/catalog — the standard-reveal coin bundles."""
+    """GET /store/catalog: coin packs plus per-action coin cost and direct price."""
 
     permission_classes = [IsAuthenticated]
 
@@ -104,17 +104,31 @@ class StoreCatalogView(APIView):
         config = ConfigurationService()
         return Response(
             {
-                "standard_reveal_bundles": config.get_standard_reveal_bundles(),
-                "safe_reveal": {
-                    "female_price_paise": config.get_safe_reveal_female_price_paise(),
-                    "male_price_paise": config.get_safe_reveal_male_price_paise(),
+                "coin_packs": config.get_coin_packs(),
+                "actions": {
+                    "reveal": {
+                        "coins": config.get_coin_cost("REVEAL"),
+                        "price_paise": config.get_reveal_price_paise(),
+                    },
+                    "safe_reveal_male": {
+                        "coins": config.get_coin_cost("SAFE_REVEAL", "MALE"),
+                        "price_paise": config.get_safe_reveal_male_price_paise(),
+                    },
+                    "safe_reveal_female": {
+                        "coins": config.get_coin_cost("SAFE_REVEAL", "FEMALE"),
+                        "price_paise": config.get_safe_reveal_female_price_paise(),
+                    },
+                    "extend": {
+                        "coins": config.get_coin_cost("CHAT_EXTENSION"),
+                        "price_paise": config.get_chat_extension_price_paise(),
+                    },
                 },
             }
         )
 
 
 class StorePurchaseView(APIView):
-    """POST /store/purchase — verify a bundle purchase and grant reveal_coins."""
+    """POST /store/purchase: verify a coin-pack purchase and grant coins."""
 
     permission_classes = [IsAuthenticated]
 

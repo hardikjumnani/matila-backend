@@ -17,7 +17,7 @@ from apps.users.models import User
 from apps.verification.models import VerificationRequest
 
 _NAMES = ["Riya Sharma", "Arjun Mehta", "Neha Gupta", "Karan Singh", "Ananya Rao"]
-_GESTURES = ["THUMBS_UP", "PEACE_SIGN", "OPEN_PALM", "WAVE"]
+_GESTURES = ["THUMBS_UP", "PEACE_SIGN", "CALL_ME", "OK_SIGN", "ROCK_ON"]
 _COLORS = [(66, 135, 245), (46, 204, 113), (241, 196, 15), (231, 76, 60), (155, 89, 182)]
 
 

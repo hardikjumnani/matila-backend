@@ -76,15 +76,104 @@ class MeEndpointTests(TestCase):
         self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
 
     def test_complete_onboarding_success(self) -> None:
+        from datetime import date
+
         self.user.full_name = "Alice"
         self.user.gender = Gender.FEMALE
         self.user.intent = Intent.RELATIONSHIP
         self.user.gender_preferences = [Gender.MALE]
+        self.user.date_of_birth = date(2000, 1, 1)
         self.user.save()
         response = self.client.post(_ME + "/complete-onboarding")
         self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
         self.assertIsNotNone(self.user.onboarding_completed_at)
+
+    # -- Date of birth + age preference ------------------------------------
+
+    def test_patch_sets_dob_during_onboarding_and_exposes_age(self) -> None:
+        from datetime import date
+
+        response = self.client.patch(
+            _ME, {"date_of_birth": "2000-05-20"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.date_of_birth, date(2000, 5, 20))
+        data = response.json()["data"]
+        self.assertEqual(data["date_of_birth"], "2000-05-20")
+        self.assertIsNotNone(data["age"])
+
+    def test_patch_dob_underage_rejected(self) -> None:
+        from datetime import date
+
+        today = date.today()
+        underage = date(today.year - 16, today.month, today.day).isoformat()
+        response = self.client.patch(
+            _ME, {"date_of_birth": underage}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_dob_not_editable_after_onboarding(self) -> None:
+        from django.utils import timezone
+
+        self.user.onboarding_completed_at = timezone.now()
+        self.user.save(update_fields=["onboarding_completed_at"])
+        response = self.client.patch(
+            _ME, {"date_of_birth": "2000-01-01"}, format="json"
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "CONFLICT")
+
+    def test_age_preference_enable_requires_both_bounds(self) -> None:
+        response = self.client.patch(
+            _ME, {"age_preference_enabled": True}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_age_preference_set_and_exposed(self) -> None:
+        response = self.client.patch(
+            _ME,
+            {
+                "age_preference_enabled": True,
+                "age_preference_min": 18,
+                "age_preference_max": 22,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertTrue(data["age_preference_enabled"])
+        self.assertEqual(data["age_preference_min"], 18)
+        self.assertEqual(data["age_preference_max"], 22)
+
+    def test_age_preference_out_of_bounds_rejected(self) -> None:
+        response = self.client.patch(
+            _ME,
+            {
+                "age_preference_enabled": True,
+                "age_preference_min": 18,
+                "age_preference_max": 40,  # > MAX_AGE (30)
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_age_preference_min_greater_than_max_rejected(self) -> None:
+        response = self.client.patch(
+            _ME,
+            {
+                "age_preference_enabled": True,
+                "age_preference_min": 25,
+                "age_preference_max": 20,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
 
     def test_profile_photo_upload(self) -> None:
         upload = SimpleUploadedFile("p.jpg", b"data", content_type="image/jpeg")

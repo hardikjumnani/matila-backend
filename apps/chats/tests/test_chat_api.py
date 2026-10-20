@@ -50,6 +50,27 @@ class ChatApiTests(TestCase):
         self.assertIsNone(data["other_participant"]["display_name"])
         self.assertEqual(data["other_participant"]["user_id"], str(self.b.id))
 
+    def test_other_participant_presence_snapshot(self) -> None:
+        from django.core.cache import cache
+
+        from apps.common.realtime import presence_key
+
+        # Offline by default: no presence key for the partner.
+        data = self.client.get(f"/api/v1/chats/{self.chat.id}").json()["data"]
+        self.assertFalse(data["other_participant"]["is_online"])
+        self.assertIsNone(data["other_participant"]["last_seen_at"])
+
+        # Partner connected -> presence key set -> snapshot reads online + last_seen.
+        cache.set(presence_key(self.b.id), "2026-10-11T00:00:00+00:00", 60)
+        try:
+            data = self.client.get(f"/api/v1/chats/{self.chat.id}").json()["data"]
+            self.assertTrue(data["other_participant"]["is_online"])
+            self.assertEqual(
+                data["other_participant"]["last_seen_at"], "2026-10-11T00:00:00+00:00"
+            )
+        finally:
+            cache.delete(presence_key(self.b.id))
+
     def test_detail_reveals_identity_when_revealed(self) -> None:
         Chat.objects.filter(id=self.chat.id).update(
             status=ChatStatus.REVEALED, current_phase=ChatPhase.REVEALED

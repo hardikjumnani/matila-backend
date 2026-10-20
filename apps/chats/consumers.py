@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from apps.chats.models import Chat, ChatParticipant
 from apps.chats.services.chat_service import ChatService
-from apps.common.realtime import chat_group_name
+from apps.common.realtime import chat_group_name, presence_key
 from apps.messaging.services.message_service import MessageService
 
 logger = logging.getLogger(__name__)
@@ -137,9 +137,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await self._set_typing(is_typing=False)
 
     async def _on_presence_heartbeat(self, payload: dict) -> None:
-        await database_sync_to_async(cache.set)(
-            self._presence_key(), "1", PRESENCE_TTL_SECONDS
-        )
+        # Client-driven keepalive: refresh the TTL AND re-broadcast "online" to
+        # the other participant. The partner's dot is thereby kept alive only
+        # while this client keeps heartbeating, so an ungraceful drop (app
+        # killed / network loss, no clean disconnect) simply stops the beats and
+        # the other side can expire the dot by staleness.
+        await self._set_presence(online=True)
 
     # -- Group broadcast forwarding ----------------------------------------
 
@@ -160,8 +163,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def _set_presence(self, *, online: bool) -> None:
         if online:
+            # Store the last-seen ISO timestamp (still truthy) so the chat
+            # serializer can expose it as other_participant.last_seen_at.
             await database_sync_to_async(cache.set)(
-                self._presence_key(), "1", PRESENCE_TTL_SECONDS
+                self._presence_key(), timezone.now().isoformat(), PRESENCE_TTL_SECONDS
             )
         else:
             await database_sync_to_async(cache.delete)(self._presence_key())
@@ -213,7 +218,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         )
 
     def _presence_key(self) -> str:
-        return f"presence:user:{self.user.id}"
+        return presence_key(self.user.id)
 
     # -- Synchronous DB work (run in a thread) ------------------------------
 

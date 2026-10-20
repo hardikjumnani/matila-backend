@@ -53,9 +53,21 @@ def build_websocket_router(app, *, debug: bool):
 # the outside so a correlation id is bound before origin/auth checks even run.
 _websocket_app = FirebaseAuthMiddleware(URLRouter(websocket_urlpatterns))
 
+# Static files: when serving via a bare ASGI server (daphne) in local development,
+# nothing serves ``STATIC_URL`` the way ``runserver`` would, so the Django admin
+# loads with no CSS/JS. Under DEBUG only, wrap the HTTP app in the staticfiles
+# handler, which serves static straight from the finders (no collectstatic needed).
+# In production (DEBUG=False) this is skipped and static is served by the platform
+# (nginx / WhiteNoise / Azure), leaving the HTTP app exactly as before.
+http_app = django_asgi_app
+if settings.DEBUG:
+    from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
+
+    http_app = ASGIStaticFilesHandler(django_asgi_app)
+
 application = ProtocolTypeRouter(
     {
-        "http": django_asgi_app,
+        "http": http_app,
         "websocket": RequestIDASGIMiddleware(
             build_websocket_router(_websocket_app, debug=settings.DEBUG)
         ),

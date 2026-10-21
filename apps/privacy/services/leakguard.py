@@ -132,6 +132,7 @@ class _Context:
     prefolded: str
     digits: str
     combined_digits: str
+    tally_digits: str
     sender_name: str
 
 
@@ -164,6 +165,76 @@ def looks_like_phone(digits: str) -> bool:
     return bool(_PHONE_RE.search(digits))
 
 
+# -- tally / run-length digit decoding ----------------------------------------
+# Evasion: encode a phone number with NO literal digits, as counts of a repeated
+# token ("N dots = digit N", space-separated), as repeated letters/emoji, or as
+# Morse. The decoders below only PROPOSE a digit string; the phone validator
+# (_PHONE_RE) is the sole gate, so a non-phone decode never blocks. Zero-FP by
+# construction: a hit needs a long contiguous block of non-prose tokens
+# (repeated-char runs or Morse codes) whose lengths/codes spell a valid mobile.
+_TALLY_MIN_GROUPS = 7   # consider a block only once this many pure groups line up
+_TALLY_MAX_RUN = 12     # a longer run is a divider/emphasis, not a digit tally
+_MORSE_DIGITS = {
+    "-----": "0", ".----": "1", "..---": "2", "...--": "3", "....-": "4",
+    ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9",
+}
+
+
+def _runlength_digits(tokens: list[str]) -> str:
+    """Longest contiguous block of pure single-character tokens (dots, dashes,
+    letters, single-codepoint emoji), each decoded as (run length % 10) so a 10
+    run encodes 0. Empty unless a block reaches ``_TALLY_MIN_GROUPS``. Prose
+    breaks the block (a normal word is not a single repeated character)."""
+    best: list[int] = []
+    cur: list[int] = []
+    for tok in tokens:
+        if 1 <= len(tok) <= _TALLY_MAX_RUN and not tok.isdigit() and len(set(tok)) == 1:
+            cur.append(len(tok))
+        else:
+            if len(cur) > len(best):
+                best = cur
+            cur = []
+    if len(cur) > len(best):
+        best = cur
+    if len(best) >= _TALLY_MIN_GROUPS:
+        return "".join(str(n % 10) for n in best)
+    return ""
+
+
+def _morse_digits(tokens: list[str]) -> str:
+    """Longest contiguous block of Morse digit codes (five dot/dash symbols each),
+    e.g. ``--... ...-- .....`` -> ``735``. Empty below ``_TALLY_MIN_GROUPS``."""
+    best: list[str] = []
+    cur: list[str] = []
+    for tok in tokens:
+        decoded = _MORSE_DIGITS.get(tok)
+        if decoded is not None:
+            cur.append(decoded)
+        else:
+            if len(cur) > len(best):
+                best = cur
+            cur = []
+    if len(cur) > len(best):
+        best = cur
+    if len(best) >= _TALLY_MIN_GROUPS:
+        return "".join(best)
+    return ""
+
+
+def decode_tally_digits(text: str) -> str:
+    """Candidate phone digits recovered from a tally/run-length or Morse encoding
+    (evasions that carry no literal digits). Returns a digit string ONLY when it
+    forms a valid mobile (``_PHONE_RE``); a non-phone decode yields '' and never
+    blocks. This single phone gate is what keeps the decoders zero false-positive."""
+    tokens = (text or "").split()
+    if len(tokens) < _TALLY_MIN_GROUPS:
+        return ""
+    for candidate in (_runlength_digits(tokens), _morse_digits(tokens)):
+        if candidate and _PHONE_RE.search(candidate):
+            return candidate
+    return ""
+
+
 def _near(a: list[int], b: list[int], max_dist: int) -> bool:
     return any(abs(x - y) <= max_dist for x in a for y in b)
 
@@ -189,6 +260,7 @@ class LeakGuard:
             prefolded=normalize.prefold_numeric(raw),
             digits=digits,
             combined_digits=combined,
+            tally_digits=decode_tally_digits(raw),
             sender_name=sender_name or "",
         )
         hits = self._detect(ctx, include_phone=True)
@@ -261,6 +333,7 @@ class LeakGuard:
             prefolded=normalize.prefold_numeric(raw),
             digits=extract_digits(raw),
             combined_digits=extract_digits(raw),
+            tally_digits=decode_tally_digits(raw),
             sender_name=sender_name or "",
         )
         hits = self._detect(ctx, include_phone=True)
@@ -271,6 +344,11 @@ class LeakGuard:
         if _PHONE_RE.search(ctx.digits):
             return Hit(LeakCategory.PHONE.value, _HIGH, "phone",
                        _PHONE_RE.search(ctx.digits).group(0))
+        # Tally / run-length / Morse encodings (decode_tally_digits only returns a
+        # string that already validates as a mobile, so presence => a phone leak).
+        if ctx.tally_digits:
+            return Hit(LeakCategory.PHONE.value, _HIGH, "tally",
+                       _PHONE_RE.search(ctx.tally_digits).group(0))
         if _PHONE_RE.search(ctx.combined_digits):
             return Hit(LeakCategory.PHONE.value, _HIGH, "reassembler", "<reassembled>")
         if normalize.digit_count(ctx.prefolded) >= _PHONE_MIN_DIGITS \

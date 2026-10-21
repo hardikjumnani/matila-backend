@@ -39,6 +39,16 @@ BENIGN: list[tuple[str, str, str]] = [
     # partner's name must never be blocked for the sender (anti-de-anon rule):
     ("are you isha by any chance", "", "Hardik Jumnani"),
     ("nice talking to you today", "the canteen is nearby", ""),
+    # Tally / run-length / Morse evasion must NOT false-positive on normal text:
+    ("that was great ... really ... hmm ...", "", ""),
+    ("wait...... are you even there", "", ""),
+    ("ok. yes. no. maybe. sure.", "", ""),
+    ("soooo good and niceeee work today", "", ""),
+    ("noooo wayyyy that is wild", "", ""),
+    ("here is a divider ---------- all done", "", ""),
+    ("a b c d e f g h i j", "", ""),  # 10 pure single-char groups, all 1s -> no phone
+    ("great work everyone 👍👍👍 👍👍 👍", "", ""),
+    ("ooooooo ooooo o oooooo oo ooo oooo", "", ""),  # 7 pure groups but not a phone
 ]
 
 # (text, prior_text, sender_name)
@@ -66,6 +76,11 @@ MALICIOUS: list[tuple[str, str, str]] = [
     ("i am hardik", "", "Hardik Jumnani"),   # self-name (own)
     ("on insta", "add me", ""),              # cross-message steer
     ("canteen", "lets meet me at the", ""),  # cross-message meeting
+    # Tally / run-length / Morse encodings of a phone (no literal digits) -> 9876543210
+    ("......... ........ ....... ...... ..... .... ... .. . ..........", "", ""),  # dots
+    ("ooooooooo oooooooo ooooooo oooooo ooooo oooo ooo oo o oooooooooo", "", ""),  # letters
+    ("----. ---.. --... -.... ..... ....- ...-- ..--- .---- -----", "", ""),       # morse
+    ("..... .... ... .. . ..........", "......... ........ ....... ......", ""),    # split across messages
 ]
 
 

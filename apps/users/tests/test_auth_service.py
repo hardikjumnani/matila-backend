@@ -121,6 +121,30 @@ class BootstrapSessionTests(TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.data.next_action, NextAction.SUBMIT_VERIFICATION)
 
+    def test_session_carries_resubmission_note(self) -> None:
+        # The admin's resubmission note rides the session so the client can show
+        # "why you're resubmitting" on the re-onboarding entry.
+        user = User.objects.create(
+            firebase_uid=self.uid,
+            college_email=self.email,
+            verification_status=VerificationStatus.RESUBMISSION_REQUIRED,
+        )
+        VerificationRequest.objects.create(
+            user=user,
+            attempt_number=1,
+            status=VerificationStatus.RESUBMISSION_REQUIRED,
+            review_notes="Re-upload a clearer ID.",
+            submitted_at=timezone.now(),
+        )
+        result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
+        self.assertTrue(result.success)
+        self.assertEqual(result.data.review_notes, "Re-upload a clearer ID.")
+
+    def test_session_note_empty_for_non_resubmission(self) -> None:
+        User.objects.create(firebase_uid=self.uid, college_email=self.email)
+        result = self.service.bootstrap_session(firebase_uid=self.uid, email=self.email)
+        self.assertEqual(result.data.review_notes, "")
+
 
 class NextActionTests(TestCase):
     def setUp(self) -> None:

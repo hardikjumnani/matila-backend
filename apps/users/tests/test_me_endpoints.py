@@ -126,6 +126,27 @@ class MeEndpointTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"]["code"], "CONFLICT")
 
+    def test_dob_re_editable_during_resubmission_reonboarding(self) -> None:
+        # Resubmission clears onboarding_completed_at, which re-opens DOB editing
+        # for the re-onboarding pass; a previously-set DOB can be changed, and it
+        # re-locks once onboarding completes again.
+        from datetime import date
+
+        from django.utils import timezone
+
+        self.user.date_of_birth = date(2000, 1, 1)
+        self.user.onboarding_completed_at = timezone.now()
+        self.user.save(update_fields=["date_of_birth", "onboarding_completed_at"])
+        # What request_resubmission does: clear onboarding_completed_at.
+        self.user.onboarding_completed_at = None
+        self.user.save(update_fields=["onboarding_completed_at"])
+        response = self.client.patch(
+            _ME, {"date_of_birth": "2001-03-04"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.date_of_birth, date(2001, 3, 4))
+
     def test_age_preference_enable_requires_both_bounds(self) -> None:
         response = self.client.patch(
             _ME, {"age_preference_enabled": True}, format="json"

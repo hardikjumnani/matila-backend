@@ -33,6 +33,9 @@ class SessionData:
     user: User
     next_action: NextAction
     created: bool
+    # Admin's resubmission note, surfaced on the re-onboarding entry so the user
+    # knows why. Non-empty only when verification_status is RESUBMISSION_REQUIRED.
+    review_notes: str = ""
 
 
 class AuthService:
@@ -323,8 +326,23 @@ class AuthService:
 
         next_action = self._determine_next_action(user)
         return ServiceResult.ok(
-            SessionData(user=user, next_action=next_action, created=created)
+            SessionData(
+                user=user,
+                next_action=next_action,
+                created=created,
+                review_notes=self._resubmission_note(user),
+            )
         )
+
+    def _resubmission_note(self, user: User) -> str:
+        """The admin's note for a RESUBMISSION_REQUIRED user (surfaced on the
+        re-onboarding entry so they know why they're resubmitting), else empty."""
+        if user.verification_status != VerificationStatus.RESUBMISSION_REQUIRED:
+            return ""
+        from apps.verification.services.verification_service import VerificationService
+
+        latest = VerificationService().get_latest_request(user)
+        return (latest.review_notes or "").strip() if latest else ""
 
     def _rejection_message(self, user: User) -> str:
         """The admin's rejection note for a REJECTED user, or a generic fallback."""

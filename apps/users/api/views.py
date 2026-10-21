@@ -84,6 +84,9 @@ class SessionView(APIView):
                 "user": UserSerializer(data.user).data,
                 "next_action": data.next_action.value,
                 "created": data.created,
+                # Admin's resubmission note (RESUBMISSION_REQUIRED only; "" otherwise)
+                # so the client can show "why you're resubmitting" on re-onboarding.
+                "review_notes": data.review_notes,
             },
             status=status_code,
         )

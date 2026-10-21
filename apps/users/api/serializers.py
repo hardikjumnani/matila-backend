@@ -136,3 +136,10 @@ class SessionResponseSerializer(serializers.Serializer):
         ]
     )
     created = serializers.BooleanField()
+    review_notes = serializers.CharField(
+        allow_blank=True,
+        help_text=(
+            "Admin's resubmission note when verification_status is "
+            "RESUBMISSION_REQUIRED; empty string otherwise."
+        ),
+    )

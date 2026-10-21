@@ -102,3 +102,14 @@ class UserErasureServiceTests(TestCase):
             # Second run on the already-erased user must not error.
             summary = UserErasureService().erase(self.user)
         self.assertEqual(summary["messages"], 0)
+
+    def test_erase_ends_the_users_ongoing_chats(self) -> None:
+        from apps.chats.enums import ChatStatus
+
+        with mock.patch(_DELETE_OBJECT), mock.patch(_DELETE_FB, return_value=True):
+            summary = UserErasureService().erase(self.user)
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.status, ChatStatus.ENDED)
+        self.assertEqual(summary["chats_ended"], 1)
+        # The other participant's row survives; only their chat is ended.
+        self.assertTrue(ChatParticipant.objects.filter(user=self.other).exists())

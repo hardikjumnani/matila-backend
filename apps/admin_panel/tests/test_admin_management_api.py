@@ -69,6 +69,54 @@ class AdminUserManagementTests(TestCase):
         self.target.refresh_from_db()
         self.assertEqual(self.target.account_status, AccountStatus.ACTIVE)
 
+    def test_erase_deletes_and_anonymizes_and_audits(self) -> None:
+        email = self.target.college_email
+        response = self.client.post(
+            f"/api/v1/admin/users/{self.target.id}/erase",
+            {"confirm": email},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.account_status, AccountStatus.DELETED)
+        self.assertTrue(self.target.college_email.startswith("erased-"))
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="user.erased", entity_id=str(self.target.id)
+            ).exists()
+        )
+
+    def test_erase_requires_matching_confirm(self) -> None:
+        response = self.client.post(
+            f"/api/v1/admin/users/{self.target.id}/erase",
+            {"confirm": "wrong@college.edu"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.account_status, AccountStatus.ACTIVE)
+
+    def test_erase_already_deleted_conflicts(self) -> None:
+        self.target.account_status = AccountStatus.DELETED
+        self.target.save(update_fields=["account_status"])
+        response = self.client.post(
+            f"/api/v1/admin/users/{self.target.id}/erase",
+            {"confirm": self.target.college_email},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_erase_admin_account_refused(self) -> None:
+        response = self.client.post(
+            f"/api/v1/admin/users/{self.admin.id}/erase",
+            {"confirm": self.admin.college_email},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.admin.refresh_from_db()
+        self.assertEqual(self.admin.account_status, AccountStatus.ACTIVE)
+
 
 @override_settings(ADMIN_EMAILS=[_ADMIN_EMAIL])
 class AdminConfigManagementTests(TestCase):

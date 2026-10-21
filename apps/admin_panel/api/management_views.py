@@ -6,6 +6,7 @@ cache invalidation happen automatically.
 
 from __future__ import annotations
 
+from django.conf import settings
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -30,6 +31,7 @@ from apps.configuration.services.configuration_service import ConfigurationServi
 from apps.users.enums import AccountStatus
 from apps.users.models import User
 from apps.users.services.auth_service import AuthService
+from apps.users.services.erasure_service import UserErasureService
 
 # -- User management --------------------------------------------------------
 
@@ -118,6 +120,42 @@ class AdminUserBanView(_AdminUserStatusView):
     @extend_schema(request=None, responses=AdminUserSerializer)
     def post(self, request: Request, user_id: str) -> Response:
         return self._apply(request, user_id)
+
+
+class AdminUserEraseView(AdminAPIView):
+    """POST /admin/users/{id}/erase — complete right-to-erasure of a user.
+
+    Irreversible: purges personal data + media + the Firebase login, ends the
+    user's ongoing chats, and anonymizes the row (payments/reports retained
+    PII-free). Guarded by a typed-email confirmation; refuses admins, self, and
+    already-erased users. Audit + the data work live in UserErasureService.
+    """
+
+    @extend_schema(
+        request=None, responses=OpenApiResponse(description="Erasure summary.")
+    )
+    def post(self, request: Request, user_id: str) -> Response:
+        user = User.objects.filter(id=user_id).first()
+        if user is None:
+            return envelope_error("RESOURCE_NOT_FOUND", "User not found.", 404)
+        if user.account_status == AccountStatus.DELETED:
+            return envelope_error("CONFLICT", "User is already deleted.", 409)
+        allowed = {e.strip().lower() for e in settings.ADMIN_EMAILS}
+        if (user.college_email or "").lower() in allowed:
+            return envelope_error("FORBIDDEN", "Cannot erase an admin account.", 403)
+        if str(user.id) == str(request.user.id):
+            return envelope_error("FORBIDDEN", "Cannot erase your own account.", 403)
+        confirm = (request.data or {}).get("confirm", "")
+        if not isinstance(confirm, str) or confirm.strip().lower() != (
+            user.college_email or ""
+        ).lower():
+            return envelope_error(
+                "VALIDATION_ERROR",
+                "Type the user's email exactly to confirm erasure.",
+                400,
+            )
+        summary = UserErasureService().erase(user, requested_by=str(request.user.id))
+        return Response(summary)
 
 
 # -- Feature flags & app config --------------------------------------------

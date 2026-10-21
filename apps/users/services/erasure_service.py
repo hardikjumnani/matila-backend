@@ -18,6 +18,7 @@ import logging
 
 from django.db import transaction
 
+from apps.chats.enums import ChatStatus, EndReason
 from apps.chats.models import ChatParticipant
 from apps.matchmaking.models import MatchQueue
 from apps.messaging.models import Message
@@ -81,6 +82,21 @@ class UserErasureService:
             except Exception:  # noqa: BLE001 — storage errors must not block erasure.
                 logger.warning("erase_user: failed to delete blob for user %s", user_id)
 
+        # 1.5) End the user's ongoing chats so the other participant gets a clean
+        # "chat ended" (read-only + a chat.state_updated broadcast) rather than a
+        # one-sided/broken chat once this user's participation is deleted below.
+        from apps.chats.services.chat_service import ChatService
+
+        chat_service = ChatService()
+        chats_ended = 0
+        for chat_id in list(
+            ChatParticipant.objects.filter(user=user)
+            .exclude(chat__status=ChatStatus.ENDED)
+            .values_list("chat_id", flat=True)
+        ):
+            if chat_service.end_chat(str(chat_id), reason=EndReason.USER_EXIT).success:
+                chats_ended += 1
+
         # 2) Hard-delete personal rows + anonymize the user row atomically.
         with transaction.atomic():
             summary = {
@@ -113,6 +129,8 @@ class UserErasureService:
             user.verified_at = None
             user.account_status = AccountStatus.DELETED
             user.save()
+
+        summary["chats_ended"] = chats_ended
 
         # 3) Delete the Firebase Auth identity (best effort).
         firebase_deleted = self._delete_firebase_user(firebase_uid)

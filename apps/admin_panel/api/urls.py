@@ -18,6 +18,7 @@ from apps.admin_panel.api.management_views import (
     AdminUserActivateView,
     AdminUserBanView,
     AdminUserDetailView,
+    AdminUserEraseView,
     AdminUserListView,
     AdminUserSuspendView,
 )
@@ -110,6 +111,11 @@ urlpatterns = [
         "admin/users/<uuid:user_id>/ban",
         AdminUserBanView.as_view(),
         name="user-ban",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/erase",
+        AdminUserEraseView.as_view(),
+        name="user-erase",
     ),
     # Feature flags
     path(

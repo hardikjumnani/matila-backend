@@ -78,7 +78,7 @@ class VerificationServiceTests(TestCase):
         # Two requests on the same in-progress draft must return the same gesture
         # and must not re-roll (a re-roll would strand a selfie already taken for
         # the previous gesture).
-        fixed = {"code": "THUMBS_UP", "label": "Thumbs up", "emoji": "\U0001f44d"}
+        fixed = {"code": "CALL_ME", "label": "Swag", "emoji": "\U0001f919"}
         with mock.patch(
             "apps.verification.services.verification_service.secrets.choice",
             return_value=fixed,
@@ -86,8 +86,8 @@ class VerificationServiceTests(TestCase):
             first = self.service.generate_gesture(self.user)
             second = self.service.generate_gesture(self.user)
         self.assertTrue(first.success and second.success)
-        self.assertEqual(first.data["code"], "THUMBS_UP")
-        self.assertEqual(second.data["code"], "THUMBS_UP")
+        self.assertEqual(first.data["code"], "CALL_ME")
+        self.assertEqual(second.data["code"], "CALL_ME")
         self.assertEqual(choice.call_count, 1)  # rolled once, not re-rolled
         self.assertEqual(
             VerificationRequest.objects.filter(user=self.user).count(), 1

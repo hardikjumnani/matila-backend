@@ -92,10 +92,7 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     # gestures can be added/relabelled at runtime with no app release. Runtime
     # editable via the admin app-config (validated in validators.py).
     AppConfigKey.GESTURE_POOL: [
-        {"code": "THUMBS_UP", "label": "Thumbs up", "emoji": "\U0001F44D"},
-        {"code": "PEACE_SIGN", "label": "Peace sign", "emoji": "✌️"},
-        {"code": "CLOSED_FIST", "label": "Closed fist", "emoji": "✊"},
-        {"code": "CALL_ME", "label": "Call me", "emoji": "\U0001F919"},
+        {"code": "CALL_ME", "label": "Swag", "emoji": "\U0001F919"},
         {"code": "LOVE_YOU_SIGN", "label": "Love-you sign", "emoji": "\U0001F91F"},
         {"code": "ROCK_ON", "label": "Rock on", "emoji": "\U0001F918"},
         {"code": "OK_SIGN", "label": "OK sign", "emoji": "\U0001F44C"},

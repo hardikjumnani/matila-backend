@@ -128,7 +128,13 @@ class VerificationApiTests(TestCase):
         VerificationService().request_resubmission(
             request_id=str(req.id), admin_id="1", notes="Re-upload your ID"
         )
+        # Resubmission now routes the user back through full onboarding, which
+        # clears onboarding_completed_at and gates the verification endpoints until
+        # they re-onboard. Simulate the re-onboarding, then the review note shows.
         self.user.refresh_from_db()
+        self.assertIsNone(self.user.onboarding_completed_at)
+        self.user.onboarding_completed_at = timezone.now()
+        self.user.save(update_fields=["onboarding_completed_at"])
         body = self.client.get("/api/v1/verification/status").json()["data"]
         self.assertEqual(body["review_message"], "Re-upload your ID")
 

@@ -375,6 +375,14 @@ class VerificationService:
             if new_status == VerificationStatus.APPROVED:
                 user.verified_at = now
                 update_fields.append("verified_at")
+            if new_status == VerificationStatus.RESUBMISSION_REQUIRED:
+                # Send the user back through the FULL onboarding (not just
+                # re-submit verification): clearing onboarding_completed_at makes
+                # the next session's next_action resolve to COMPLETE_ONBOARDING.
+                # Profile fields are kept so the client can pre-fill; re-onboarding
+                # overwrites what the user re-submits.
+                user.onboarding_completed_at = None
+                update_fields.append("onboarding_completed_at")
             user.save(update_fields=update_fields)
 
         # Side effects run after the transaction commits.

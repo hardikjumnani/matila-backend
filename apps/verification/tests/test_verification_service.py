@@ -211,6 +211,28 @@ class VerificationServiceTests(TestCase):
         )
         self.assertEqual(status["review_message"], "Re-upload your ID")
 
+    def test_resubmission_resets_onboarding(self) -> None:
+        # Resubmission sends the user back through FULL onboarding: clearing
+        # onboarding_completed_at makes the next session resolve to
+        # COMPLETE_ONBOARDING.
+        self.user.onboarding_completed_at = timezone.now()
+        self.user.save(update_fields=["onboarding_completed_at"])
+        request = self._submitted()
+        self.service.request_resubmission(request_id=str(request.id), admin_id="1")
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.onboarding_completed_at)
+        self.assertEqual(
+            self.user.verification_status, VerificationStatus.RESUBMISSION_REQUIRED
+        )
+
+    def test_reject_and_approve_keep_onboarding(self) -> None:
+        # Only resubmission re-onboards; reject/approve leave onboarding intact.
+        self.user.onboarding_completed_at = timezone.now()
+        self.user.save(update_fields=["onboarding_completed_at"])
+        self.service.reject(request_id=str(self._submitted().id), admin_id="1")
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.onboarding_completed_at)
+
     def test_status_no_review_message_when_pending(self) -> None:
         self._submitted()
         self.user.refresh_from_db()

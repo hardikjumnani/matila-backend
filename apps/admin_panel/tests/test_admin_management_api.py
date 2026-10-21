@@ -114,6 +114,7 @@ class AdminUserManagementTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "PROTECTED_TARGET")
         self.admin.refresh_from_db()
         self.assertEqual(self.admin.account_status, AccountStatus.ACTIVE)
 

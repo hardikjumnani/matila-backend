@@ -140,11 +140,17 @@ class AdminUserEraseView(AdminAPIView):
             return envelope_error("RESOURCE_NOT_FOUND", "User not found.", 404)
         if user.account_status == AccountStatus.DELETED:
             return envelope_error("CONFLICT", "User is already deleted.", 409)
+        # Distinct code (not FORBIDDEN) so the client doesn't confuse a protected
+        # TARGET with the caller not being an admin.
         allowed = {e.strip().lower() for e in settings.ADMIN_EMAILS}
         if (user.college_email or "").lower() in allowed:
-            return envelope_error("FORBIDDEN", "Cannot erase an admin account.", 403)
+            return envelope_error(
+                "PROTECTED_TARGET", "Cannot erase an admin account.", 403
+            )
         if str(user.id) == str(request.user.id):
-            return envelope_error("FORBIDDEN", "Cannot erase your own account.", 403)
+            return envelope_error(
+                "PROTECTED_TARGET", "Cannot erase your own account.", 403
+            )
         confirm = (request.data or {}).get("confirm", "")
         if not isinstance(confirm, str) or confirm.strip().lower() != (
             user.college_email or ""

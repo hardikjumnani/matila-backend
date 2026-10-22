@@ -21,8 +21,9 @@ from django.db import transaction
 from apps.chats.enums import ChatStatus, EndReason
 from apps.chats.models import ChatParticipant
 from apps.matchmaking.models import MatchQueue
-from apps.messaging.models import Message
+from apps.messaging.models import Message, MessageReaction
 from apps.notifications.models import DeviceToken, Notification
+from apps.privacy.models import LeakEvent, ProfanityEvent, SuspicionEvent
 from apps.ratings.models import Rating
 from apps.reveal.models import ParticipantDecision
 from apps.users.enums import AccountStatus
@@ -114,7 +115,26 @@ class UserErasureService:
                     user=user
                 ).delete()[0],
                 "ratings_given": Rating.objects.filter(rated_by=user).delete()[0],
+                # Reactions the user left (incl. on the partner's surviving
+                # messages; reactions on the user's own messages already cascade
+                # with those messages above).
+                "reactions_deleted": MessageReaction.objects.filter(
+                    user=user
+                ).delete()[0],
             }
+
+            # Violation history is RETAINED (the user's score/strikes stay for
+            # safety), but the raw leaked text is scrubbed so a right-to-erasure
+            # request still removes the user's own content. Rows + scores survive.
+            summary["leak_events_scrubbed"] = LeakEvent.objects.filter(
+                user=user
+            ).update(raw_message="", matched_span="")
+            summary["profanity_events_scrubbed"] = ProfanityEvent.objects.filter(
+                user=user
+            ).update(raw_message="", masked_message="", words=[])
+            summary["suspicion_events_scrubbed"] = SuspicionEvent.objects.filter(
+                user=user
+            ).update(raw_message="", signals=[])
 
             # Payments (financial) + reports (safety) + ratings received keep a
             # PII-free reference; the row can't be hard-deleted (PROTECT), so scrub

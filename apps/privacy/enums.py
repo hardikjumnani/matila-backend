@@ -53,3 +53,30 @@ class ProfanityTier(models.TextChoices):
 class MuffleMode(models.TextChoices):
     SHADOW = "shadow", "Shadow (log only)"
     MASK = "mask", "Mask"
+
+
+class ViolationSource(models.TextChoices):
+    """Where a recorded violation was caught. BACKEND = the Veil scanner on the
+    server; FRONTEND = the app's own client-side guard, self-reported."""
+
+    BACKEND = "BACKEND", "Backend (Veil)"
+    FRONTEND = "FRONTEND", "Frontend (client-reported)"
+
+
+class SuspicionSignal(models.TextChoices):
+    """Non-blocking soft signals from the second-hand Veil (SuspicionGuard)."""
+
+    NON_LATIN_SCRIPT = "NON_LATIN_SCRIPT", "Non-Latin script"
+    ROMANIZED_INDIC = "ROMANIZED_INDIC", "Romanized Indic / code-mix"
+    GIBBERISH = "GIBBERISH", "Gibberish / keyboard-mash"
+    OBFUSCATION = "OBFUSCATION", "Obfuscation / evasion characters"
+    NEAR_MISS = "NEAR_MISS", "Near-miss leak signal"
+
+
+class SuspicionReviewStatus(models.TextChoices):
+    """Admin assessment state of a user's accumulated suspicion."""
+
+    UNREVIEWED = "UNREVIEWED", "Unreviewed"
+    REVIEWED = "REVIEWED", "Reviewed"
+    CLEARED = "CLEARED", "Cleared (benign)"
+    ACTIONED = "ACTIONED", "Actioned"

@@ -131,6 +131,19 @@ class ConfigurationService:
         """The verification gesture pool: a list of {code, label, emoji} objects."""
         return list(self.get_config(AppConfigKey.GESTURE_POOL) or [])
 
+    def get_reaction_emojis(self) -> list[str]:
+        """The active message-reaction emoji set."""
+        return list(self.get_config(AppConfigKey.REACTION_EMOJIS) or [])
+
+    def _reactions(self) -> dict:
+        """Reaction set for the client: ``{version, emojis}``. ``version`` is a
+        short stable hash of the list so the client cache-busts on an admin edit."""
+        import hashlib
+
+        emojis = self.get_reaction_emojis()
+        version = hashlib.sha1("\u0000".join(emojis).encode("utf-8")).hexdigest()[:8]
+        return {"version": version, "emojis": emojis}
+
     def get_gesture(self, code: str) -> dict | None:
         """Resolve a stored gesture code to its {code, label, emoji}. For a code no
         longer in the pool (e.g. a historical gesture), return a graceful fallback
@@ -197,6 +210,7 @@ class ConfigurationService:
                 ),
             },
             "age": self._age_bounds(),
+            "reactions": self._reactions(),
             "rating_questionnaire": self.get_rating_questionnaire(),
             "faq": self.get_config(AppConfigKey.FAQ_CONTENT),
             "community_guidelines": self.get_config(AppConfigKey.COMMUNITY_GUIDELINES),

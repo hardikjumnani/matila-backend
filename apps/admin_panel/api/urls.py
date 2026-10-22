@@ -29,11 +29,15 @@ from apps.admin_panel.api.report_views import (
     AdminReportResolveView,
 )
 from apps.admin_panel.api.safety_views import (
+    AdminChatMessagesView,
     AdminLeakEventListView,
     AdminOffenderListView,
+    AdminOffenderSuspicionListView,
     AdminProfanityEventListView,
     AdminResetStrikesView,
     AdminSafetyStatsView,
+    AdminSuspicionEventListView,
+    AdminSuspicionReviewView,
     AdminUserSafetyDetailView,
 )
 from apps.admin_panel.api.verification_views import (
@@ -165,9 +169,19 @@ urlpatterns = [
         name="safety-profanity-events",
     ),
     path(
+        "admin/safety/suspicion-events",
+        AdminSuspicionEventListView.as_view(),
+        name="safety-suspicion-events",
+    ),
+    path(
         "admin/safety/offenders",
         AdminOffenderListView.as_view(),
         name="safety-offenders",
+    ),
+    path(
+        "admin/safety/suspicion-offenders",
+        AdminOffenderSuspicionListView.as_view(),
+        name="safety-suspicion-offenders",
     ),
     path("admin/safety/stats", AdminSafetyStatsView.as_view(), name="safety-stats"),
     path(
@@ -179,5 +193,15 @@ urlpatterns = [
         "admin/safety/users/<uuid:user_id>/reset-strikes",
         AdminResetStrikesView.as_view(),
         name="safety-reset-strikes",
+    ),
+    path(
+        "admin/safety/users/<uuid:user_id>/suspicion/review",
+        AdminSuspicionReviewView.as_view(),
+        name="safety-suspicion-review",
+    ),
+    path(
+        "admin/chats/<uuid:chat_id>/messages",
+        AdminChatMessagesView.as_view(),
+        name="chat-messages",
     ),
 ]

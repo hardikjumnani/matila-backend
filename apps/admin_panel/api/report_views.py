@@ -45,7 +45,11 @@ class AdminReportDetailView(AdminAPIView):
         report = Report.objects.filter(id=report_id).first()
         if report is None:
             return envelope_error("RESOURCE_NOT_FOUND", "Report not found.", 404)
-        messages = Message.objects.filter(chat_id=report.chat_id).order_by("created_at")
+        messages = (
+            Message.objects.filter(chat_id=report.chat_id)
+            .prefetch_related("reactions")
+            .order_by("created_at")
+        )
         return Response(
             {
                 "report": AdminReportSerializer(report).data,

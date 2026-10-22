@@ -112,6 +112,10 @@ FEATURE_FLAG_SEED: dict[str, tuple[bool, str]] = {
     ),
     FeatureFlagKey.IMAGE_MESSAGES_ENABLED: (True, "Image messages in chat."),
     FeatureFlagKey.MAINTENANCE_MODE: (False, "Global maintenance mode."),
+    FeatureFlagKey.SUSPICION_ENABLED: (
+        False,
+        "Second-hand Veil suspicion engine. OFF until tuned in shadow.",
+    ),
 }
 
 

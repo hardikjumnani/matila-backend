@@ -16,6 +16,20 @@ from apps.messaging.enums import MediaStatus, MediaVisibility, MessageType
 from apps.messaging.models import Message
 
 
+def reactions_payload(message: Message, *, mask_deleted: bool = True) -> list[dict]:
+    """Current reactions on a message as ``[{user_id, emoji}]``.
+
+    ``mask_deleted`` hides reactions on a soft-deleted message (the user-facing
+    rule, like hiding its text/media); admin evidence passes ``False`` to keep
+    them. Relies on ``reactions`` being prefetched for list rendering (no N+1)."""
+    if mask_deleted and message.is_deleted:
+        return []
+    return [
+        {"user_id": str(r.user_id), "emoji": r.emoji}
+        for r in message.reactions.all()
+    ]
+
+
 def build_message_payload(message: Message) -> dict[str, Any]:
     # VIEW_ONCE media never ships a URL — the recipient fetches the bytes once via
     # POST /messages/{id}/view (server-mediated, exactly-once). ``media_pending``
@@ -46,5 +60,6 @@ def build_message_payload(message: Message) -> dict[str, Any]:
             str(message.reply_to_message_id) if message.reply_to_message_id else None
         ),
         "is_deleted": message.is_deleted,
+        "reactions": reactions_payload(message),
         "created_at": message.created_at.isoformat(),
     }

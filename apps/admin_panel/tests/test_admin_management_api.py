@@ -118,6 +118,45 @@ class AdminUserManagementTests(TestCase):
         self.admin.refresh_from_db()
         self.assertEqual(self.admin.account_status, AccountStatus.ACTIVE)
 
+    def test_erase_scrubs_violation_text_but_keeps_rows(self) -> None:
+        from apps.privacy.models import LeakEvent, ProfanityEvent, SuspicionEvent
+
+        leak = LeakEvent.objects.create(
+            user=self.target, category="PHONE", severity="HIGH", action="BLOCK",
+            mode="enforce", raw_message="call me 9876543210", matched_span="9876543210",
+        )
+        prof = ProfanityEvent.objects.create(
+            user=self.target, tier="T1_HARSH", mode="mask",
+            raw_message="you jerk", masked_message="you j***", words=["jerk"],
+        )
+        susp = SuspicionEvent.objects.create(
+            user=self.target, top_signal="NEAR_MISS", score=3,
+            raw_message="ping me on insta",
+            signals=[{"signal": "NEAR_MISS", "weight": 3, "span": "insta"}],
+        )
+        resp = self.client.post(
+            f"/api/v1/admin/users/{self.target.id}/erase",
+            {"confirm": self.target.college_email},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()["data"]
+        self.assertEqual(data["leak_events_scrubbed"], 1)
+        self.assertEqual(data["profanity_events_scrubbed"], 1)
+        self.assertEqual(data["suspicion_events_scrubbed"], 1)
+
+        leak.refresh_from_db(); prof.refresh_from_db(); susp.refresh_from_db()
+        # Rows survive (score/category kept) but the raw text is gone.
+        self.assertEqual(leak.raw_message, "")
+        self.assertEqual(leak.matched_span, "")
+        self.assertEqual(leak.category, "PHONE")
+        self.assertEqual(prof.raw_message, "")
+        self.assertEqual(prof.masked_message, "")
+        self.assertEqual(prof.words, [])
+        self.assertEqual(susp.raw_message, "")
+        self.assertEqual(susp.signals, [])
+        self.assertEqual(susp.score, 3)  # score preserved
+
 
 @override_settings(ADMIN_EMAILS=[_ADMIN_EMAIL])
 class AdminConfigManagementTests(TestCase):

@@ -89,3 +89,37 @@ class Message(UUIDModel):
 
     def __str__(self) -> str:
         return f"Message<{self.id}> chat={self.chat_id} {self.message_type}"
+
+
+class MessageReaction(UUIDModel):
+    """One emoji reaction by a user on a message. The unique (message, user)
+    constraint enforces one reaction per user per message: re-reacting with a
+    different emoji UPDATEs the row (replace), the same emoji is removed via
+    DELETE. Emoji is validated against the runtime ``reaction_emojis`` set."""
+
+    message = models.ForeignKey(
+        Message,
+        on_delete=models.CASCADE,
+        related_name="reactions",
+    )
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="message_reactions",
+    )
+    emoji = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "message_reactions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "user"], name="uniq_reaction_per_user_message"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["message"], name="idx_reaction_message"),
+        ]
+
+    def __str__(self) -> str:
+        return f"MessageReaction<{self.id}> msg={self.message_id} {self.emoji}"

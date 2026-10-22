@@ -36,6 +36,8 @@ class AppConfigKey:
     MATCHMAKING_TIMEOUT_SECONDS = "matchmaking_timeout_seconds"
     GESTURE_POOL = "gesture_pool"
     CHAT_EXPIRY_WARNING_MINUTES = "chat_expiry_warning_minutes"
+    # Emoji set for message reactions (runtime-editable, like the gesture pool).
+    REACTION_EMOJIS = "reaction_emojis"
     # Veil (anti-leakage) engine, see docs/VEIL_ENGINE_PLAN.md.
     VEIL_MODE = "veil_mode"  # "shadow" | "enforce"
     VEIL_WINDOW_SECONDS = "veil_window_seconds"  # legacy (time window); superseded
@@ -43,6 +45,11 @@ class AppConfigKey:
     VEIL_ESCALATE_THRESHOLD = "veil_escalate_threshold"
     # Muffle (profanity softening) engine, see docs/MUFFLE_PROFANITY_PLAN.md.
     MUFFLE_MODE = "muffle_mode"  # "shadow" | "mask"
+    # Suspicion engine (second-hand Veil, non-blocking soft signals). See
+    # docs/VEIL_VIOLATION_TRACKING_AND_SUSPICION_PLAN.md.
+    SUSPICION_SIGNAL_WEIGHTS = "suspicion_signal_weights"  # {signal: weight}
+    SUSPICION_MIN_RECORD_WEIGHT = "suspicion_min_record_weight"  # skip trivial noise
+    SUSPICION_ATTENTION_SCORE = "suspicion_attention_score"  # per-user audit threshold
 
 
 class FeatureFlagKey:
@@ -52,6 +59,8 @@ class FeatureFlagKey:
     MAINTENANCE_MODE = "maintenance_mode"
     VEIL_ENABLED = "veil_enabled"
     MUFFLE_ENABLED = "muffle_enabled"
+    # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
+    SUSPICION_ENABLED = "suspicion_enabled"
 
 
 # Fallback values used when a key has not been seeded in the database.
@@ -77,6 +86,10 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
+    # CHOSEN: message-reaction emoji set (runtime-editable; the FE bundles the
+    # same default and falls back to it offline). Served via GET /config.
+    AppConfigKey.REACTION_EMOJIS: ["❤️", "\U0001F602", "\U0001F62E",
+                                   "\U0001F622", "\U0001F44D", "\U0001F525"],
     # CHOSEN: Veil anti-leakage engine. Mode starts at "enforce" so the control
     # is active in dev; production should run "shadow" first to tune (see plan).
     AppConfigKey.VEIL_MODE: "enforce",
@@ -86,6 +99,18 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     # CHOSEN: Muffle profanity softener. "mask" is active in dev; production may
     # start "shadow" to tune the tier boundary first (see plan).
     AppConfigKey.MUFFLE_MODE: "mask",
+    # CHOSEN: Suspicion engine (second-hand Veil). Non-blocking; records soft
+    # signals for admin review. Per-signal weights + record/attention thresholds
+    # are runtime-tunable so the admin feed can be kept usable without a deploy.
+    AppConfigKey.SUSPICION_SIGNAL_WEIGHTS: {
+        "NON_LATIN_SCRIPT": 2,
+        "ROMANIZED_INDIC": 2,
+        "GIBBERISH": 2,
+        "OBFUSCATION": 3,
+        "NEAR_MISS": 3,
+    },
+    AppConfigKey.SUSPICION_MIN_RECORD_WEIGHT: 2,
+    AppConfigKey.SUSPICION_ATTENTION_SCORE: 8,
     # CHOSEN: gesture instructions the verification flow can request. Each entry is
     # {code, label, emoji}: the CODE is stored on verification_requests.gesture_type
     # (stable identifier); label + emoji are presentation, served to the client so
@@ -124,4 +149,5 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     FeatureFlagKey.MAINTENANCE_MODE: False,
     FeatureFlagKey.VEIL_ENABLED: True,
     FeatureFlagKey.MUFFLE_ENABLED: True,
+    FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
 }

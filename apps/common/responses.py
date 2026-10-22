@@ -45,6 +45,8 @@ ERROR_STATUS_MAP: dict[str, int] = {
     "INVALID_REPLY_TARGET": http.HTTP_400_BAD_REQUEST,
     # Veil anti-leakage engine blocked an outgoing message (contact/PII leak).
     "MESSAGE_BLOCKED": http.HTTP_422_UNPROCESSABLE_ENTITY,
+    # A reaction emoji not in the active reaction_emojis set.
+    "INVALID_REACTION": http.HTTP_400_BAD_REQUEST,
     "MEDIA_NOT_AVAILABLE": http.HTTP_410_GONE,
     "METHOD_NOT_ALLOWED": http.HTTP_405_METHOD_NOT_ALLOWED,
     "RATE_LIMITED": http.HTTP_429_TOO_MANY_REQUESTS,

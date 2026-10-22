@@ -8,6 +8,7 @@ from apps.messaging.api.views import (
     ChatImageMessageView,
     ChatMessagesView,
     MessageDeleteView,
+    MessageReactionView,
     MessageViewOnceView,
 )
 
@@ -24,6 +25,11 @@ urlpatterns = [
         "messages/<uuid:message_id>/view",
         MessageViewOnceView.as_view(),
         name="message-view",
+    ),
+    path(
+        "messages/<uuid:message_id>/reactions",
+        MessageReactionView.as_view(),
+        name="message-reactions",
     ),
     path(
         "messages/<uuid:message_id>", MessageDeleteView.as_view(), name="message-delete"

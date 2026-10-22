@@ -23,7 +23,7 @@ from django.utils import timezone
 from apps.chats.enums import ChatPhase
 from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
-from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.constants import AppConfigKey, FeatureFlagKey
 from apps.messaging.constants import MAX_TEXT_MESSAGE_LENGTH, MEDIA_RETENTION_DAYS
 from apps.messaging.enums import MediaStatus, MediaVisibility, MessageType
 from apps.messaging.models import Message
@@ -46,6 +46,7 @@ class MessageService:
         configuration_service=None,
         veil_service=None,
         muffle_service=None,
+        suspicion_service=None,
     ) -> None:
         if chat_service is None:
             from apps.chats.services.chat_service import ChatService
@@ -69,11 +70,16 @@ class MessageService:
             from apps.privacy.services.muffle_service import MuffleService
 
             muffle_service = MuffleService()
+        if suspicion_service is None:
+            from apps.privacy.services.suspicion_service import SuspicionService
+
+            suspicion_service = SuspicionService()
         self._chats = chat_service
         self._storage = storage_service
         self._config = configuration_service
         self._veil = veil_service
         self._muffle = muffle_service
+        self._suspicion = suspicion_service
 
     # -- Queries ------------------------------------------------------------
 
@@ -114,6 +120,9 @@ class MessageService:
             decision = self._veil.inspect_text(chat=chat, sender=sender, text=content)
             if decision.blocked:
                 return ServiceResult.fail("MESSAGE_BLOCKED", decision.user_message)
+            # Second-hand Veil: non-blocking soft-signal scan on the allowed
+            # message (admin-only; never affects the user). Fail-open internally.
+            self._suspicion.inspect(chat=chat, sender=sender, text=content)
 
         # Muffle profanity softener: unlike Veil it never blocks — it rewrites the
         # text (harsh/targeted words partially masked) and applies in every phase.
@@ -308,6 +317,82 @@ class MessageService:
                 )
             )
         return ServiceResult.ok(message)
+
+    # -- Reactions ----------------------------------------------------------
+
+    def set_reaction(
+        self, *, message_id: str, user: User, emoji: str
+    ) -> ServiceResult[Message]:
+        """Set (or replace) the caller's reaction on a message. One per user per
+        message; a different emoji replaces the previous one."""
+        message, error = self._resolve_reactable_message(message_id, user)
+        if error is not None:
+            return error
+        active = set(self._config.get_config(AppConfigKey.REACTION_EMOJIS) or [])
+        if emoji not in active:
+            return ServiceResult.fail(
+                "INVALID_REACTION", "That reaction isn't available."
+            )
+        from apps.messaging.models import MessageReaction
+
+        MessageReaction.objects.update_or_create(
+            message=message, user=user, defaults={"emoji": emoji}
+        )
+        self._broadcast_reaction(
+            message,
+            "reaction.added",
+            {
+                "message_id": str(message.id),
+                "user_id": str(user.id),
+                "emoji": emoji,
+            },
+        )
+        return ServiceResult.ok(message)
+
+    def remove_reaction(
+        self, *, message_id: str, user: User
+    ) -> ServiceResult[Message]:
+        """Remove the caller's reaction (idempotent: ok even if none existed)."""
+        message, error = self._resolve_reactable_message(message_id, user)
+        if error is not None:
+            return error
+        from apps.messaging.models import MessageReaction
+
+        deleted, _ = MessageReaction.objects.filter(
+            message=message, user=user
+        ).delete()
+        if deleted:
+            self._broadcast_reaction(
+                message,
+                "reaction.removed",
+                {"message_id": str(message.id), "user_id": str(user.id)},
+            )
+        return ServiceResult.ok(message)
+
+    def _resolve_reactable_message(
+        self, message_id: str, user: User
+    ) -> tuple[Message | None, ServiceResult | None]:
+        message = self.get_message(message_id)
+        if message is None or message.is_deleted:
+            return None, ServiceResult.fail("RESOURCE_NOT_FOUND", "Message not found.")
+        if message.message_type == MessageType.SYSTEM:
+            return None, ServiceResult.fail(
+                "VALIDATION_ERROR", "You can't react to this message."
+            )
+        chat = message.chat
+        if not self._chats.is_participant(chat, user):
+            return None, ServiceResult.fail(
+                "FORBIDDEN", "You are not a participant of this chat."
+            )
+        if not self._chats.is_writable(chat):
+            return None, ServiceResult.fail(
+                "CHAT_READ_ONLY", "This chat no longer accepts reactions."
+            )
+        return message, None
+
+    def _broadcast_reaction(self, message: Message, event: str, payload: dict) -> None:
+        chat_id = str(message.chat_id)
+        transaction.on_commit(lambda: broadcast_to_chat(chat_id, event, payload))
 
     # -- Internal -----------------------------------------------------------
 

@@ -14,6 +14,7 @@ from rest_framework import serializers
 from apps.common.api.serializers import ImageUploadSerializer
 from apps.common.media import resolve_media_url
 from apps.messaging.enums import MediaStatus, MediaVisibility, MessageType
+from apps.messaging.realtime import reactions_payload
 
 
 class MessageSerializer(serializers.Serializer):
@@ -31,10 +32,14 @@ class MessageSerializer(serializers.Serializer):
     viewed_at = serializers.DateTimeField(allow_null=True)
     reply_to_message_id = serializers.UUIDField(allow_null=True)
     is_deleted = serializers.BooleanField()
+    reactions = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
 
     def get_text_content(self, obj) -> str:
         return "" if obj.is_deleted else obj.text_content
+
+    def get_reactions(self, obj) -> list[dict]:
+        return reactions_payload(obj)
 
     def get_media_url(self, obj) -> str | None:
         if obj.is_deleted or obj.message_type != MessageType.IMAGE:
@@ -64,6 +69,13 @@ class SendTextMessageSerializer(serializers.Serializer):
 
     content = serializers.CharField(allow_blank=False, trim_whitespace=True)
     reply_to_message_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class SetReactionSerializer(serializers.Serializer):
+    """Body for POST /messages/{id}/reactions. The emoji is validated against the
+    active ``reaction_emojis`` set by the service (INVALID_REACTION otherwise)."""
+
+    emoji = serializers.CharField(max_length=16, allow_blank=False)
 
 
 class SendImageMessageSerializer(ImageUploadSerializer):

@@ -24,6 +24,7 @@ from apps.messaging.api.serializers import (
     MessageSerializer,
     SendImageMessageSerializer,
     SendTextMessageSerializer,
+    SetReactionSerializer,
 )
 from apps.messaging.models import Message
 from apps.messaging.services.message_service import MessageService
@@ -41,7 +42,9 @@ class ChatMessagesView(ListAPIView):
 
     def get_queryset(self):
         # Newest-first, cursor-paginated (see StandardCursorPagination.ordering).
-        return Message.objects.filter(chat_id=self.kwargs["chat_id"])
+        return Message.objects.filter(
+            chat_id=self.kwargs["chat_id"]
+        ).prefetch_related("reactions")
 
     @extend_schema(request=SendTextMessageSerializer, responses=MessageSerializer)
     def post(self, request: Request, chat_id: str) -> Response:
@@ -134,6 +137,41 @@ class MessageDeleteView(APIView):
     @extend_schema(responses=MessageSerializer)
     def delete(self, request: Request, message_id: str) -> Response:
         result = self.service.soft_delete(message_id=message_id, user=request.user)
+        if result.failed:
+            return service_failure_response(result)
+        return Response(MessageSerializer(result.data).data)
+
+
+class MessageReactionView(APIView):
+    """POST/DELETE /messages/{id}/reactions — set or remove the caller's reaction.
+
+    One reaction per user per message: POST with an emoji in the active set
+    replaces any existing reaction; DELETE removes it. Allowed only while the
+    chat is writable; participant-checked in the service.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.service = MessageService()
+
+    @extend_schema(request=SetReactionSerializer, responses=MessageSerializer)
+    def post(self, request: Request, message_id: str) -> Response:
+        serializer = SetReactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = self.service.set_reaction(
+            message_id=message_id,
+            user=request.user,
+            emoji=serializer.validated_data["emoji"],
+        )
+        if result.failed:
+            return service_failure_response(result)
+        return Response(MessageSerializer(result.data).data)
+
+    @extend_schema(request=None, responses=MessageSerializer)
+    def delete(self, request: Request, message_id: str) -> Response:
+        result = self.service.remove_reaction(message_id=message_id, user=request.user)
         if result.failed:
             return service_failure_response(result)
         return Response(MessageSerializer(result.data).data)

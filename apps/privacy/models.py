@@ -20,7 +20,10 @@ from .enums import (
     LeakSeverity,
     MuffleMode,
     ProfanityTier,
+    SuspicionReviewStatus,
+    SuspicionSignal,
     VeilMode,
+    ViolationSource,
 )
 
 
@@ -42,6 +45,15 @@ class LeakEvent(UUIDModel):
     severity = models.CharField(max_length=6, choices=LeakSeverity.choices)
     action = models.CharField(max_length=10, choices=LeakAction.choices)
     mode = models.CharField(max_length=10, choices=VeilMode.choices)
+    # Where the violation was caught: the backend Veil scanner, or the app's own
+    # client-side guard (self-reported). FRONTEND rows are evidence tagged as
+    # client-sourced; see ViolationReportService.
+    source = models.CharField(
+        max_length=10,
+        choices=ViolationSource.choices,
+        default=ViolationSource.BACKEND,
+        db_index=True,
+    )
     rule_version = models.CharField(max_length=40, default="")
 
     detectors = models.JSONField(default=list, blank=True)
@@ -119,3 +131,78 @@ class LeakStrike(TimeStampedUUIDModel):
 
     def __str__(self) -> str:
         return f"LeakStrike<{self.id}> user={self.user_id} count={self.count}"
+
+
+class SuspicionEvent(UUIDModel):
+    """Non-blocking soft-signal record from the second-hand Veil (SuspicionGuard).
+
+    Never affects the user; recorded purely for admin assessment and for tuning
+    Veil. Stores the raw message for admin review (kept indefinitely, same policy
+    as chat text and LeakEvent)."""
+
+    chat = models.ForeignKey(
+        "chats.Chat",
+        on_delete=models.CASCADE,
+        related_name="suspicion_events",
+        null=True,
+        blank=True,
+    )
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="suspicion_events",
+    )
+
+    signals = models.JSONField(default=list, blank=True)  # [{signal, weight, span}]
+    top_signal = models.CharField(
+        max_length=20, choices=SuspicionSignal.choices, blank=True, default=""
+    )
+    score = models.PositiveIntegerField(default=0)
+    rule_version = models.CharField(max_length=40, default="")
+    raw_message = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "suspicion_events"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="idx_susp_user_created"),
+            models.Index(fields=["chat", "created_at"], name="idx_susp_chat_created"),
+            models.Index(fields=["top_signal"], name="idx_susp_signal"),
+        ]
+
+    def __str__(self) -> str:
+        return f"SuspicionEvent<{self.id}> user={self.user_id} {self.top_signal}/{self.score}"
+
+
+class UserSuspicionProfile(TimeStampedUUIDModel):
+    """Per-user cumulative suspicion aggregate + the admin's assessment state.
+
+    Separate from LeakStrike (which is backend-verified enforcement): suspicion is
+    advisory only and never auto-acts on the account."""
+
+    user = models.OneToOneField(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="suspicion_profile",
+    )
+    score = models.PositiveIntegerField(default=0)
+    event_count = models.PositiveIntegerField(default=0)
+    last_event_at = models.DateTimeField(null=True, blank=True)
+
+    review_status = models.CharField(
+        max_length=12,
+        choices=SuspicionReviewStatus.choices,
+        default=SuspicionReviewStatus.UNREVIEWED,
+        db_index=True,
+    )
+    reviewed_by = models.CharField(max_length=64, blank=True, default="")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "user_suspicion_profiles"
+
+    def __str__(self) -> str:
+        return f"UserSuspicionProfile<{self.id}> user={self.user_id} score={self.score}"

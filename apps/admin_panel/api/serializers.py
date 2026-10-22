@@ -16,7 +16,9 @@ from apps.common.media import resolve_media_url
 from apps.configuration.models import AppConfig, FeatureFlag
 from apps.messaging.enums import MediaStatus
 from apps.messaging.models import Message
-from apps.privacy.models import LeakEvent, ProfanityEvent
+from apps.messaging.realtime import reactions_payload
+from apps.privacy.enums import SuspicionReviewStatus
+from apps.privacy.models import LeakEvent, ProfanityEvent, SuspicionEvent
 from apps.reports.enums import ResolutionAction
 from apps.reports.models import Report
 from apps.users.models import User
@@ -136,12 +138,17 @@ class AdminMessageSerializer(serializers.Serializer):
     text_content = serializers.CharField()
     media_url = serializers.SerializerMethodField()
     is_deleted = serializers.BooleanField()
+    reactions = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
 
     def get_media_url(self, obj: Message) -> str | None:
         if obj.media_url and obj.media_status != MediaStatus.DELETED:
             return resolve_media_url(obj.media_url)
         return None
+
+    def get_reactions(self, obj: Message) -> list[dict]:
+        # Admins see reactions as evidence even on deleted messages.
+        return reactions_payload(obj, mask_deleted=False)
 
 
 class ResolveReportSerializer(serializers.Serializer):
@@ -275,6 +282,7 @@ class AdminLeakEventSerializer(serializers.ModelSerializer):
             "severity",
             "action",
             "mode",
+            "source",
             "rule_version",
             "detectors",
             "matched_span",
@@ -282,6 +290,39 @@ class AdminLeakEventSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class AdminSuspicionEventSerializer(serializers.ModelSerializer):
+    """Second-hand Veil suspicion event with applicant context, for the T&S view."""
+
+    user_id = serializers.UUIDField(read_only=True)
+    chat_id = serializers.UUIDField(read_only=True, allow_null=True)
+    user_email = serializers.CharField(source="user.college_email", read_only=True)
+    user_name = serializers.CharField(source="user.full_name", read_only=True)
+
+    class Meta:
+        model = SuspicionEvent
+        fields = [
+            "id",
+            "user_id",
+            "user_email",
+            "user_name",
+            "chat_id",
+            "top_signal",
+            "score",
+            "signals",
+            "rule_version",
+            "raw_message",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SuspicionReviewSerializer(serializers.Serializer):
+    """Admin assessment of a user's accumulated suspicion."""
+
+    status = serializers.ChoiceField(choices=SuspicionReviewStatus.choices)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class AdminProfanityEventSerializer(serializers.ModelSerializer):

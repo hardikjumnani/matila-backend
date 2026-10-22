@@ -26,7 +26,7 @@ from apps.privacy.constants import (
     MAX_ACCUMULATED_DIGITS,
     MAX_WINDOW_CHARS,
 )
-from apps.privacy.enums import LeakAction, LeakCategory, VeilMode
+from apps.privacy.enums import LeakAction, LeakCategory, VeilMode, ViolationSource
 from apps.privacy.models import LeakEvent, LeakStrike
 from apps.privacy.services.leakguard import LeakGuard, Verdict, extract_digits
 
@@ -196,6 +196,7 @@ class VeilService:
             severity=verdict.top_severity or "",
             action=action,
             mode=mode,
+            source=ViolationSource.BACKEND.value,
             rule_version=ruleset.RULESET_VERSION,
             detectors=verdict.detectors,
             raw_message=(raw_text or "")[:4000],  # temporary: store raw for admin review

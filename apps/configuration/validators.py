@@ -91,6 +91,22 @@ def _validate_gesture_pool(value) -> None:
         raise ConfigValidationError("gesture_pool has duplicate codes.")
 
 
+def _validate_reaction_emojis(value) -> None:
+    if not isinstance(value, list) or not value:
+        raise ConfigValidationError("reaction_emojis must be a non-empty list.")
+    if len(value) > 12:
+        raise ConfigValidationError("reaction_emojis may have at most 12 entries.")
+    for i, emoji in enumerate(value):
+        if not isinstance(emoji, str) or not emoji.strip():
+            raise ConfigValidationError(
+                f"reaction_emojis[{i}] must be a non-empty string."
+            )
+        if len(emoji) > 16:
+            raise ConfigValidationError(f"reaction_emojis[{i}] is too long.")
+    if len(value) != len(set(value)):
+        raise ConfigValidationError("reaction_emojis has duplicates.")
+
+
 def validate_app_config(key: str, value) -> None:
     """Raise ConfigValidationError if an admin-submitted value is invalid.
     Unlisted keys are not constrained here."""
@@ -101,3 +117,5 @@ def validate_app_config(key: str, value) -> None:
         _validate_coin_packs(value)
     elif key == AppConfigKey.GESTURE_POOL:
         _validate_gesture_pool(value)
+    elif key == AppConfigKey.REACTION_EMOJIS:
+        _validate_reaction_emojis(value)

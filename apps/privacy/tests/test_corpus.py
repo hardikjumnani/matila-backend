@@ -49,6 +49,11 @@ BENIGN: list[tuple[str, str, str]] = [
     ("a b c d e f g h i j", "", ""),  # 10 pure single-char groups, all 1s -> no phone
     ("great work everyone 👍👍👍 👍👍 👍", "", ""),
     ("ooooooo ooooo o oooooo oo ooo oooo", "", ""),  # 7 pure groups but not a phone
+    # Glued self-name tier must not fire on a short name token inside real words,
+    # nor on anyone but the sender:
+    ("coming soon to the library", "", "Om Sharma"),      # "om" < glue floor
+    ("welcome home everyone", "", "Om Sharma"),           # "om" inside "welcome"/"home"
+    ("are you himanshu by any chance", "", "Hardik Jumnani"),  # partner's name, not sender's
 ]
 
 # (text, prior_text, sender_name)
@@ -81,6 +86,12 @@ MALICIOUS: list[tuple[str, str, str]] = [
     ("ooooooooo oooooooo ooooooo oooooo ooooo oooo ooo oo o oooooooooo", "", ""),  # letters
     ("----. ---.. --... -.... ..... ....- ...-- ..--- .---- -----", "", ""),       # morse
     ("..... .... ... .. . ..........", "......... ........ ....... ......", ""),    # split across messages
+    # Glued / clubbed self-name (sender "Himanshu Chauhan") -> SELF_NAME.
+    ("Myhimanshuself", "", "Himanshu Chauhan"),           # letters on both sides
+    ("it is himaaanshu here", "", "Himanshu Chauhan"),    # stretch
+    ("call me h i m a n s h u", "", "Himanshu Chauhan"),  # separator glue
+    ("h1man5hu this side", "", "Himanshu Chauhan"),       # leetspeak
+    ("chauhanhereactually", "", "Himanshu Chauhan"),      # second token glued
 ]
 
 

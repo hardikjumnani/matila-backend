@@ -72,6 +72,7 @@ _MEETING_SIGNALS = {"INVITE", "DESTINATION", "TIME", "DIRECTIONS", "LOCATION_PIN
 _ASK_PLATFORM_DIST = 25
 _STEER_PLATFORM_DIST = 20
 _SELF_NAME_MIN_TOKEN = 3
+_SELF_NAME_GLUE_MIN = 6    # only tokens this long get the unbounded (glued) match
 _PHONE_MIN_DIGITS = 7      # libphonenumber only runs past this many digits
 _GLUE_MIN_TOKEN = 6        # collapsed view only runs if a token is this long
 
@@ -316,7 +317,7 @@ class LeakGuard:
         hits.extend(self._signal_scan(ctx, suppress_platform=bool(hits)))
 
         if ctx.sender_name:
-            sn = self._self_name(fb, ctx.sender_name)
+            sn = self._self_name(ctx)
             if sn is not None:
                 hits.append(sn)
         return hits
@@ -442,12 +443,28 @@ class LeakGuard:
         return None
 
     @staticmethod
-    def _self_name(fold_base: str, sender_name: str) -> Hit | None:
+    def _self_name(ctx: _Context) -> Hit | None:
         tokens = {
-            t for t in re.split(r"[^a-z0-9]+", (sender_name or "").lower())
+            t for t in re.split(r"[^a-z0-9]+", (ctx.sender_name or "").lower())
             if len(t) >= _SELF_NAME_MIN_TOKEN
         }
+        # Tier 1 - boundary match on the exact fold view (unchanged behaviour).
         for tok in tokens:
-            if re.search(r"(?<![a-z])" + re.escape(tok) + r"(?![a-z])", fold_base):
+            if re.search(r"(?<![a-z])" + re.escape(tok) + r"(?![a-z])", ctx.fold_base):
                 return Hit(LeakCategory.SELF_NAME.value, _HIGH, "self_name", tok)
+        # Tier 2 - glued/clubbed match: the name wedged inside other letters or
+        # split by separators ("Myhimanshuself", "h i m a n s h u", "himaaanshu",
+        # "h1man5hu"). Only DISTINCTIVE (long) tokens get the unbounded substring
+        # test, matched against the separator-free collapsed view (and its leet
+        # fold), so short tokens can never fire inside ordinary words (zero-FP).
+        collapsed = normalize.collapse_all(ctx.raw)
+        collapsed_leet = collapsed.translate(_LEET)
+        for tok in tokens:
+            if len(tok) < _SELF_NAME_GLUE_MIN:
+                continue
+            needle = normalize.collapse_all(tok)  # same space as the haystack
+            if needle and (needle in collapsed or needle in collapsed_leet):
+                return Hit(
+                    LeakCategory.SELF_NAME.value, _HIGH, "self_name_glued", tok
+                )
         return None

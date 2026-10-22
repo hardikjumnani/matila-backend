@@ -219,6 +219,29 @@ class MultilingualAndEvasionTests(SimpleTestCase):
         # The partner's name is never checked against this sender.
         self.assertFalse(self.g.scan("are you isha", sender_name="Hardik Jumnani").blocked)
 
+    def test_self_name_glued_in_letters(self):
+        # Name wedged inside other letters defeats the boundary match; the
+        # collapsed-view substring tier catches it (distinctive long token).
+        name = "Himanshu Chauhan"
+        for text in (
+            "Myhimanshuself",            # letters on both sides (reported case)
+            "it is himaaanshu here",     # stretch -> squeeze
+            "call me h i m a n s h u",   # separator glue
+            "h1man5hu this side",        # leetspeak
+            "chauhanhereactually",       # second token, glued
+        ):
+            self._blocked(text, LeakCategory.SELF_NAME.value, sender_name=name)
+
+    def test_self_name_short_token_not_substring_blocked(self):
+        # A short name token (< glue floor) must NOT fire inside ordinary words,
+        # or the partner is deanonymised by accident. "om" in "coming soon".
+        self.assertFalse(
+            self.g.scan("coming soon to the library", sender_name="Om Sharma").blocked
+        )
+        self.assertFalse(
+            self.g.scan("welcome home everyone", sender_name="Om Sharma").blocked
+        )
+
 
 class EvasionV21Tests(SimpleTestCase):
     """v2.1: space-stripping, misspelling/stretch, and split-across-messages,

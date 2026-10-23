@@ -67,10 +67,15 @@ class AdminUserDetailView(AdminAPIView):
         user = User.objects.filter(id=user_id).first()
         if user is None:
             return envelope_error("RESOURCE_NOT_FOUND", "User not found.", 404)
-        active_chat = ChatService().get_active_chat(user)
+        chats = ChatService()
+        active_chat = chats.get_active_chat(user)
+        active_chat_ids = chats.active_chat_ids(user)
         summary = {
             "chat_count": ChatParticipant.objects.filter(user=user).count(),
+            # Kept for back-compat (one representative); a user may now have
+            # several ongoing chats (parallel friendship), listed in active_chat_ids.
             "active_chat_id": str(active_chat.id) if active_chat else None,
+            "active_chat_ids": active_chat_ids,
         }
         return Response(
             {"user": AdminUserSerializer(user).data, "chat_summary": summary}

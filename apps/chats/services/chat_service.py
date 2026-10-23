@@ -36,7 +36,12 @@ from apps.chats.enums import (
 from apps.chats.models import Chat, ChatParticipant
 from apps.common.realtime import broadcast_to_chat
 from apps.common.results import ServiceResult
+from apps.users.enums import Intent
 from apps.users.models import User
+
+# Legacy chats (pre-matched_intent) and any chat whose intent is unset are treated
+# as RELATIONSHIP by the exclusivity check (conservative: they hold the slot).
+_RELATIONSHIP_MATCHED = (Intent.RELATIONSHIP, "")
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +113,36 @@ class ChatService:
                 status=ParticipantStatus.ACTIVE,
                 chat__status__in=self.MATCH_BLOCKING_STATUSES,
             )
+            .order_by("-chat__created_at")  # newest: the just-created match wins
             .first()
         )
         return participant.chat if participant else None
+
+    def has_open_relationship_chat(self, user: User) -> bool:
+        """Whether the user already occupies the one-RELATIONSHIP-chat slot: an
+        open anonymous window (ACTIVE/EXTENDED/EXPIRED) whose matched_intent is
+        RELATIONSHIP (empty legacy intent counts as relationship). FRIENDSHIP /
+        CASUAL chats are unlimited and never count here. REVEALED frees the slot."""
+        return ChatParticipant.objects.filter(
+            user=user,
+            status=ParticipantStatus.ACTIVE,
+            chat__status__in=self.MATCH_BLOCKING_STATUSES,
+            chat__matched_intent__in=_RELATIONSHIP_MATCHED,
+        ).exists()
+
+    def active_chat_ids(self, user: User) -> list[str]:
+        """All of the user's ongoing chats (a user may now have several, e.g.
+        multiple parallel friendship chats)."""
+        return [
+            str(cid)
+            for cid in ChatParticipant.objects.filter(
+                user=user,
+                status=ParticipantStatus.ACTIVE,
+                chat__status__in=self.ONGOING_STATUSES,
+            )
+            .order_by("-chat__created_at")
+            .values_list("chat_id", flat=True)
+        ]
 
     def has_active_chat(self, user: User) -> bool:
         """Whether the user is currently in an ongoing chat (writable: ACTIVE,
@@ -202,27 +234,36 @@ class ChatService:
     # -- Creation -----------------------------------------------------------
 
     @transaction.atomic
-    def create_chat(self, user_a: User, user_b: User) -> ServiceResult[Chat]:
+    def create_chat(
+        self, user_a: User, user_b: User, *, intent: str | None = None
+    ) -> ServiceResult[Chat]:
         """Create an anonymous chat between two distinct users.
 
-        Guards the one-active-chat-per-user rule defensively (the matchmaker
-        already checks it, but this service is the authority on chat state).
+        ``intent`` is the shared match intent, snapshotted onto the chat
+        (``matched_intent``); defaults to ``user_a.intent`` when not given. The
+        one-active-chat rule is enforced ONLY for RELATIONSHIP (the matchmaker
+        checks too, but this service is the authority on chat state);
+        FRIENDSHIP/CASUAL chats may run in parallel.
         """
         if user_a.id == user_b.id:
             return ServiceResult.fail(
                 "VALIDATION_ERROR", "Cannot create a chat with a single user."
             )
-        if self.has_open_anonymous_chat(user_a) or self.has_open_anonymous_chat(
-            user_b
+        if intent is None:
+            intent = user_a.intent or ""
+        if intent == Intent.RELATIONSHIP and (
+            self.has_open_relationship_chat(user_a)
+            or self.has_open_relationship_chat(user_b)
         ):
             return ServiceResult.fail(
-                "CONFLICT", "One of the users is already in an active chat."
+                "CONFLICT", "One of the users already has an active relationship chat."
             )
 
         now = timezone.now()
         chat = Chat.objects.create(
             status=ChatStatus.ACTIVE,
             current_phase=ChatPhase.ANONYMOUS,
+            matched_intent=intent,
             status_changed_at=now,
             current_phase_ends_at=now
             + _resolve_window(

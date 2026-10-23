@@ -13,6 +13,7 @@ from django.db import models
 from django.utils import timezone
 
 from apps.common.models import UUIDModel
+from apps.users.enums import Intent
 
 from .enums import (
     ChatPhase,
@@ -33,6 +34,13 @@ class Chat(UUIDModel):
         max_length=10,
         choices=ChatPhase.choices,
         default=ChatPhase.ANONYMOUS,
+    )
+    # The intent both users matched on, snapshotted at creation. Drives the
+    # "one active RELATIONSHIP chat per user" rule (FRIENDSHIP/CASUAL are
+    # unlimited). Stable against later profile-intent edits. Empty on legacy
+    # chats is treated as RELATIONSHIP (conservative) by the exclusivity check.
+    matched_intent = models.CharField(
+        max_length=20, choices=Intent.choices, blank=True, default=""
     )
     end_reason = models.CharField(
         max_length=15, choices=EndReason.choices, blank=True, default=""

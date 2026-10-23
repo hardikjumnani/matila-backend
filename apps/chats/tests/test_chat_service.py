@@ -52,10 +52,19 @@ class ChatServiceTests(TestCase):
     def test_create_chat_rejects_same_user(self) -> None:
         self.assertTrue(self.service.create_chat(self.a, self.a).failed)
 
-    def test_create_chat_rejects_when_user_already_in_chat(self) -> None:
-        self._chat()
-        result = self.service.create_chat(self.a, _user())
+    def test_create_chat_rejects_second_relationship_chat(self) -> None:
+        from apps.users.enums import Intent
+
+        self.service.create_chat(self.a, self.b, intent=Intent.RELATIONSHIP)
+        result = self.service.create_chat(self.a, _user(), intent=Intent.RELATIONSHIP)
         self.assertEqual(result.error_code, "CONFLICT")
+
+    def test_create_chat_allows_parallel_friendship_chats(self) -> None:
+        from apps.users.enums import Intent
+
+        self.service.create_chat(self.a, self.b, intent=Intent.FRIENDSHIP)
+        result = self.service.create_chat(self.a, _user(), intent=Intent.FRIENDSHIP)
+        self.assertTrue(result.success)
 
     def test_has_and_get_active_chat(self) -> None:
         chat = self._chat()

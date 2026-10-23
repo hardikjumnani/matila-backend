@@ -25,7 +25,6 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from apps.chats.enums import ChatStatus
 from apps.chats.models import Chat, ChatParticipant
 from apps.common.results import ServiceResult
 from apps.matchmaking.constants import LOBBY_BUCKET_SIZE
@@ -99,8 +98,13 @@ class MatchmakingService:
         eligibility = self._check_eligibility(user)
         if eligibility.failed:
             return ServiceResult.fail(eligibility.error_code, eligibility.error_message)
-        if self._chats.has_open_anonymous_chat(user):
-            return ServiceResult.fail("CONFLICT", "You are already in an active chat.")
+        # One active RELATIONSHIP chat per user; FRIENDSHIP/CASUAL are unlimited.
+        if user.intent == Intent.RELATIONSHIP and self._chats.has_open_relationship_chat(
+            user
+        ):
+            return ServiceResult.fail(
+                "CONFLICT", "You can only have one relationship chat at a time."
+            )
 
         with transaction.atomic():
             entry = (
@@ -149,7 +153,8 @@ class MatchmakingService:
 
         partner_entry = secrets.choice(compatible)
         partner = partner_entry.user
-        result = self._chats.create_chat(user, partner)
+        # Snapshot the shared match intent onto the chat (both entries share it).
+        result = self._chats.create_chat(user, partner, intent=entry.intent)
         if result.failed:
             # A partner became ineligible (e.g. already matched) between the
             # candidate scan and chat creation; treat as no match this round.
@@ -222,10 +227,12 @@ class MatchmakingService:
 
         Uses the matchmaking slot view (open anonymous window: ACTIVE / EXTENDED /
         EXPIRED), NOT the writable-ongoing set, so a REVEALED chat does not read as
-        MATCHED and bounce a searching user into it. See AI_BRIDGE [00056]."""
-        open_chat = self._chats.get_open_anonymous_chat(user)
-        if open_chat is not None:
-            return {"state": "MATCHED", "chat_id": str(open_chat.id)}
+        MATCHED and bounce a searching user into it. See AI_BRIDGE [00056].
+
+        SEARCHING is checked FIRST: a user may now be in a (friendship) chat AND
+        still searching for another, so an open chat must not mask the SEARCHING
+        state. A just-matched waiter has had their queue entry deleted, so they
+        fall through to MATCHED with their newest open-anonymous chat."""
         entry = MatchQueue.objects.filter(
             user=user, status=MatchQueueStatus.SEARCHING
         ).first()
@@ -235,6 +242,9 @@ class MatchmakingService:
                 "queue_entry_id": str(entry.id),
                 "joined_queue_at": entry.joined_queue_at,
             }
+        open_chat = self._chats.get_open_anonymous_chat(user)
+        if open_chat is not None:
+            return {"state": "MATCHED", "chat_id": str(open_chat.id)}
         return {"state": "IDLE"}
 
     @staticmethod
@@ -274,21 +284,24 @@ class MatchmakingService:
                 Q(gender_preferences=[])
                 | Q(gender_preferences__contains=[user.gender])
             )
-            # Exclude anyone already in an ongoing chat (not available to match).
-            busy_ids = ChatParticipant.objects.filter(
-                chat__status__in=(
-                    ChatStatus.ACTIVE,
-                    ChatStatus.EXTENDED,
-                    ChatStatus.REVEALED,
-                )
-            ).values_list("user_id", flat=True)
+            # "Busy" is intent-scoped: only a RELATIONSHIP searcher is blocked by
+            # others' open RELATIONSHIP chats (one-at-a-time). FRIENDSHIP/CASUAL
+            # searchers can match users who are already in chats, so nobody is
+            # excluded as busy for them.
+            if user.intent == Intent.RELATIONSHIP:
+                busy_ids = ChatParticipant.objects.filter(
+                    chat__status__in=self._chats.MATCH_BLOCKING_STATUSES,
+                    chat__matched_intent__in=(Intent.RELATIONSHIP, ""),
+                ).values_list("user_id", flat=True)
+                candidates = qs.exclude(id__in=busy_ids)
+            else:
+                candidates = qs
             # Previous match partners are not matchable again, so they must not
             # inflate the count either.
             past_ids = self._chats.past_partner_ids(user)
             # Age filter (relationship intent): apply the same mutual check as a
             # real match so the count reflects who this user could actually pair
             # with. Python-level over the small online set (coarse N+ number).
-            candidates = qs.exclude(id__in=busy_ids)
             if past_ids:
                 candidates = candidates.exclude(id__in=past_ids)
             compatible = sum(

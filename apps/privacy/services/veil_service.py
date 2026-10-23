@@ -136,6 +136,18 @@ class VeilService:
             self._record_event(chat, sender, verdict, LeakAction.BLOCK.value, mode, text)
             return VeilDecision(blocked=False)
 
+        # English-only policy: a non-Latin-script message is blocked + logged, but
+        # does NOT bump the strike or escalate (typing one's native language is a
+        # style nudge, not a leak attempt). See docs/VEIL_ENGLISH_ONLY_PLAN.md.
+        if verdict.top_category == LeakCategory.NON_LATIN.value:
+            self._record_event(chat, sender, verdict, LeakAction.BLOCK.value, mode, text)
+            return VeilDecision(
+                blocked=True,
+                user_message=random.choice(ruleset.TONES["english"]),
+                action=LeakAction.BLOCK.value,
+                category=LeakCategory.NON_LATIN.value,
+            )
+
         # Enforce.
         strike = self._bump_strike(sender)
         action = (

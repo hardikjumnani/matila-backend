@@ -85,6 +85,11 @@ TONES: dict[str, list[str]] = {
         "Planning to meet offline isn't available while you're both anonymous. "
         "You can sort that out after you choose to reveal. \U0001F49B",
     ],
+    # non-English script nudge (message contained non-Latin letters)
+    "english": [
+        "Let's keep the chat in English for now. Please retype your message using "
+        "the English keyboard. \U0001F49B",
+    ],
     # self-name nudge (the sender tried to reveal their own name)
     "name": [
         "Hold on. Sharing your name gives away your identity before the reveal. "

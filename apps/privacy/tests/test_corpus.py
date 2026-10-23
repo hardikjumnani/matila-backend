@@ -54,6 +54,10 @@ BENIGN: list[tuple[str, str, str]] = [
     ("coming soon to the library", "", "Om Sharma"),      # "om" < glue floor
     ("welcome home everyone", "", "Om Sharma"),           # "om" inside "welcome"/"home"
     ("are you himanshu by any chance", "", "Hardik Jumnani"),  # partner's name, not sender's
+    # English-only policy must NOT block romanized / emoji / accented Latin:
+    ("kaise ho bhai sab accha hai", "", ""),              # romanized hindi (Latin)
+    ("café José is my friend", "", ""),                   # accented Latin -> allowed
+    ("great work today 🔥🔥 so good", "", ""),             # emoji
 ]
 
 # (text, prior_text, sender_name)
@@ -92,6 +96,12 @@ MALICIOUS: list[tuple[str, str, str]] = [
     ("call me h i m a n s h u", "", "Himanshu Chauhan"),  # separator glue
     ("h1man5hu this side", "", "Himanshu Chauhan"),       # leetspeak
     ("chauhanhereactually", "", "Himanshu Chauhan"),      # second token glued
+    # Non-English script -> hard block (English-only policy).
+    ("नमस्ते", "", ""),                    # devanagari
+    ("హాయ్ ఎలా ఉన్నావు", "", ""),            # telugu
+    ("你好 friend", "", ""),               # chinese mixed with english
+    ("привет", "", ""),                   # cyrillic
+    ("hey मित्र how are you", "", ""),      # devanagari mixed in
 ]
 
 

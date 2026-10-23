@@ -65,11 +65,23 @@ def _decode_bases(text: str) -> str:
     return _BASE_RE.sub(repl, text)
 
 
+def strip_accents(text: str) -> str:
+    """Fold accented Latin to its base letter ("café" -> "cafe", "Jösé" -> "jose")
+    by decomposing (NFKD) and dropping combining marks. Keeps downstream matching
+    (self-name, keywords) robust against accent-based evasion. Emoji / non-combining
+    characters pass through unchanged."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text or "")
+        if not unicodedata.combining(c)
+    )
+
+
 def fold_base(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "")
     t = t.translate(_ZERO_WIDTH)
     t = t.translate(ruleset.CONFUSABLES_TABLE)
     t = t.lower()
+    t = strip_accents(t)  # café -> cafe, so names/keywords match the de-accented form
     return _WS_RE.sub(" ", t)
 
 

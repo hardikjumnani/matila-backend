@@ -22,6 +22,7 @@ class LeakCategory(models.TextChoices):
     SOLICITATION = "SOLICITATION", "Soliciting contact"
     MEETING = "MEETING", "Offline meeting coordination"
     SELF_NAME = "SELF_NAME", "Self-identifying name"
+    NON_LATIN = "NON_LATIN", "Non-English script"
 
 
 class LeakSeverity(models.TextChoices):

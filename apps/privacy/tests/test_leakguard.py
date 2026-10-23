@@ -242,6 +242,26 @@ class MultilingualAndEvasionTests(SimpleTestCase):
             self.g.scan("welcome home everyone", sender_name="Om Sharma").blocked
         )
 
+    def test_non_latin_script_blocked(self):
+        for text in ("नमस्ते", "హాయ్ ఎలా ఉన్నావు", "你好 friend", "привет", "hey मित्र"):
+            self._blocked(text, LeakCategory.NON_LATIN.value)
+
+    def test_english_romanized_emoji_accents_allowed(self):
+        for text in (
+            "hello how are you doing",       # english
+            "kaise ho bhai accha",           # romanized hindi (Latin) -> allowed
+            "that movie was amazing \U0001F525",  # emoji
+            "cafe mocha for 100 bucks",      # symbols/digits
+            "café José is here",   # accented Latin -> allowed
+        ):
+            self.assertFalse(self.g.scan(text).blocked, f"should allow {text!r}")
+
+    def test_accented_name_normalized_for_self_name(self):
+        # Accents are allowed but folded (cafe/jose), so an accented own-name is
+        # still caught by the self-name check.
+        self._blocked("i am jösé", LeakCategory.SELF_NAME.value,
+                      sender_name="Jose Garcia")
+
 
 class EvasionV21Tests(SimpleTestCase):
     """v2.1: space-stripping, misspelling/stretch, and split-across-messages,

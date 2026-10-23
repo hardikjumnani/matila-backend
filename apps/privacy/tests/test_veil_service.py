@@ -86,6 +86,18 @@ class VeilServiceTests(TestCase):
         self.assertFalse(d.blocked)
         self.assertFalse(LeakEvent.objects.filter(user=self.user).exists())
 
+    def test_non_latin_blocks_and_logs_but_no_strike(self):
+        svc = self._svc()
+        d = svc.inspect_text(chat=self.chat, sender=self.user, text="नमस्ते दोस्त")
+        self.assertTrue(d.blocked)
+        self.assertEqual(d.category, "NON_LATIN")
+        # Logged for admin visibility...
+        self.assertTrue(
+            LeakEvent.objects.filter(user=self.user, category="NON_LATIN").exists()
+        )
+        # ...but English-only is a nudge, not a leak strike.
+        self.assertFalse(LeakStrike.objects.filter(user=self.user).exists())
+
     def test_cross_message_reassembly_blocks_second(self):
         svc = self._svc()
         d1 = svc.inspect_text(

@@ -28,6 +28,7 @@ libphonenumber (cross-message phones are covered by the digit reassembler).
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -82,6 +83,10 @@ _CATEGORY_PRIORITY = [
     LeakCategory.SELF_NAME.value, LeakCategory.MEETING.value,
     LeakCategory.SOLICITATION.value, LeakCategory.STEERING.value,
     LeakCategory.PLATFORM.value,
+    # Lowest priority: a real leak category wins when a foreign char is used to
+    # smuggle one (so it still strikes); a PURE non-Latin message has only this
+    # hit, so it reports NON_LATIN -> the no-strike English-only nudge.
+    LeakCategory.NON_LATIN.value,
 ]
 
 
@@ -265,6 +270,9 @@ class LeakGuard:
             sender_name=sender_name or "",
         )
         hits = self._detect(ctx, include_phone=True)
+        foreign = self._foreign_script(raw)
+        if foreign is not None:
+            hits.append(foreign)
         blocked_now = any(h.severity in (_HIGH, _MEDIUM) for h in hits)
 
         # Cross-message completion: only when this message did not already block,
@@ -467,4 +475,20 @@ class LeakGuard:
                 return Hit(
                     LeakCategory.SELF_NAME.value, _HIGH, "self_name_glued", tok
                 )
+        return None
+
+    @staticmethod
+    def _foreign_script(raw: str) -> Hit | None:
+        """Block a message containing any non-Latin-script LETTER (Devanagari /
+        Telugu / Tamil / Cyrillic / Greek / Arabic / CJK / ...). Script-based, not
+        language-based: romanized Hindi/Telugu is Latin letters and passes. Accented
+        Latin, emoji, digits, punctuation and symbols are all allowed (only LETTER
+        characters outside the Latin script trip it)."""
+        for ch in raw or "":
+            if ord(ch) < 128:
+                continue  # ASCII: letters are Latin; digits/punct/symbols fine
+            if not unicodedata.category(ch).startswith("L"):
+                continue  # not a letter (emoji / symbol / punctuation / mark)
+            if "LATIN" not in unicodedata.name(ch, ""):
+                return Hit(LeakCategory.NON_LATIN.value, _HIGH, "foreign_script", ch)
         return None

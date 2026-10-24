@@ -42,6 +42,15 @@ class ChatApiTests(TestCase):
         items = response.json()["data"]["items"]
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["id"], str(self.chat.id))
+        self.assertIn("matched_intent", items[0])
+
+    def test_matched_intent_in_payload(self) -> None:
+        from apps.users.enums import Intent
+
+        u1, u2 = _user("U1"), _user("U2")
+        chat = ChatService().create_chat(u1, u2, intent=Intent.FRIENDSHIP).data
+        data = _client(u1).get(f"/api/v1/chats/{chat.id}").json()["data"]
+        self.assertEqual(data["matched_intent"], Intent.FRIENDSHIP)
 
     def test_detail_masks_identity_while_anonymous(self) -> None:
         response = self.client.get(f"/api/v1/chats/{self.chat.id}")

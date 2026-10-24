@@ -24,6 +24,9 @@ class ChatSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     status = serializers.CharField()
     current_phase = serializers.CharField()
+    # The intent the chat was matched on (RELATIONSHIP/FRIENDSHIP/CASUAL; "" for
+    # legacy chats). Lets the client label a chat + pre-block relationship repeats.
+    matched_intent = serializers.CharField(allow_blank=True)
     message_count = serializers.IntegerField()
     last_message_at = serializers.DateTimeField(allow_null=True)
     current_phase_ends_at = serializers.DateTimeField(allow_null=True)

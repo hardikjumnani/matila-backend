@@ -99,6 +99,7 @@ class AuthService:
         gender: str | None = None,
         intent: str | None = None,
         gender_preferences: list[str] | None = None,
+        match_block_names: list[str] | None = None,
         date_of_birth=None,
         age_preference_enabled: bool | None = None,
         age_preference_min: int | None = None,
@@ -139,6 +140,12 @@ class AuthService:
         if gender_preferences is not None:
             user.gender_preferences = gender_preferences
             update_fields.append("gender_preferences")
+
+        if match_block_names is not None:
+            # Separate model (BlockedName); a full-list replace, not a User column.
+            from apps.users.services.block_list_service import BlockListService
+
+            BlockListService().set_names(user, match_block_names)
 
         if date_of_birth is not None:
             # Set-once: DOB is captured at onboarding and never changed via the API

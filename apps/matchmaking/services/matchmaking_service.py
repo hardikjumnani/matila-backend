@@ -32,6 +32,7 @@ from apps.matchmaking.enums import MatchQueueStatus
 from apps.matchmaking.models import MatchQueue
 from apps.users.enums import AccountStatus, Intent, VerificationStatus
 from apps.users.models import User
+from apps.users.name_match import name_is_blocked
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class MatchmakingService:
         candidate_qs = (
             MatchQueue.objects.select_for_update(skip_locked=True, of=("self",))
             .select_related("user")
+            .prefetch_related("user__blocked_names")
             .filter(status=MatchQueueStatus.SEARCHING, intent=user.intent)
             .exclude(user_id=user.id)
         )
@@ -147,7 +149,10 @@ class MatchmakingService:
         if past_ids:
             candidate_qs = candidate_qs.exclude(user_id__in=past_ids)
         candidates = list(candidate_qs)
-        compatible = [c for c in candidates if self._is_compatible(user, entry, c)]
+        user_blocked = [bn.name_normalized for bn in user.blocked_names.all()]
+        compatible = [
+            c for c in candidates if self._is_compatible(user, entry, c, user_blocked)
+        ]
         if not compatible:
             return None
 
@@ -170,15 +175,24 @@ class MatchmakingService:
         return result.data, partner
 
     def _is_compatible(
-        self, user: User, entry: MatchQueue, candidate: MatchQueue
+        self, user: User, entry: MatchQueue, candidate: MatchQueue, user_blocked=None
     ) -> bool:
-        """Mutual gender- and age-preference compatibility (intent already
-        filtered). Both sides' filters must pass."""
+        """Mutual gender-, age-preference and name-block compatibility (intent
+        already filtered). Both sides' filters must pass; the pair is rejected if
+        EITHER has the other's name on their block list."""
+        cand = candidate.user
+        if user_blocked is None:
+            user_blocked = [bn.name_normalized for bn in user.blocked_names.all()]
+        if user_blocked and name_is_blocked(user_blocked, cand.full_name or ""):
+            return False
+        cand_blocked = [bn.name_normalized for bn in cand.blocked_names.all()]
+        if cand_blocked and name_is_blocked(cand_blocked, user.full_name or ""):
+            return False
         return (
-            self._gender_ok(candidate.user.gender, entry.gender_preferences)
+            self._gender_ok(cand.gender, entry.gender_preferences)
             and self._gender_ok(user.gender, candidate.gender_preferences)
-            and self._age_ok(user, candidate.user)
-            and self._age_ok(candidate.user, user)
+            and self._age_ok(user, cand)
+            and self._age_ok(cand, user)
         )
 
     @staticmethod
@@ -299,15 +313,23 @@ class MatchmakingService:
             # Previous match partners are not matchable again, so they must not
             # inflate the count either.
             past_ids = self._chats.past_partner_ids(user)
-            # Age filter (relationship intent): apply the same mutual check as a
-            # real match so the count reflects who this user could actually pair
-            # with. Python-level over the small online set (coarse N+ number).
+            # Age + name-block filter: apply the same mutual checks as a real match
+            # so the count reflects who this user could actually pair with.
+            # Python-level over the small online set (coarse N+ number).
             if past_ids:
                 candidates = candidates.exclude(id__in=past_ids)
+            candidates = candidates.prefetch_related("blocked_names")
+            user_blocked = [bn.name_normalized for bn in user.blocked_names.all()]
             compatible = sum(
                 1
                 for c in candidates
-                if self._age_ok(user, c) and self._age_ok(c, user)
+                if self._age_ok(user, c)
+                and self._age_ok(c, user)
+                and not (user_blocked and name_is_blocked(user_blocked, c.full_name or ""))
+                and not name_is_blocked(
+                    [b.name_normalized for b in c.blocked_names.all()],
+                    user.full_name or "",
+                )
             )
 
         return {

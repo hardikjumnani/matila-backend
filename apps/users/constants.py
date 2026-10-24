@@ -10,3 +10,8 @@ from __future__ import annotations
 # via GET /config -> age.{min_age,max_age}.
 MIN_AGE = 17
 MAX_AGE = 30
+
+# Per-user match block list (names). Caps keep match-time cost bounded and the
+# settings payload sane.
+MAX_BLOCK_NAMES = 100
+MAX_BLOCK_NAME_LEN = 50

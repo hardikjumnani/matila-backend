@@ -11,7 +11,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.common.media import resolve_media_url
-from apps.users.constants import MAX_AGE, MIN_AGE
+from apps.users.constants import MAX_AGE, MAX_BLOCK_NAME_LEN, MAX_BLOCK_NAMES, MIN_AGE
 from apps.users.enums import Gender, Intent
 from apps.users.models import User
 
@@ -24,6 +24,7 @@ class UserSerializer(serializers.ModelSerializer):
     profile_photo_url = serializers.SerializerMethodField()
     college = serializers.SerializerMethodField()
     launched = serializers.SerializerMethodField()
+    match_block_names = serializers.SerializerMethodField()
     # Derived age (property on the model); null until a DOB is set.
     age = serializers.IntegerField(read_only=True, allow_null=True)
 
@@ -37,6 +38,7 @@ class UserSerializer(serializers.ModelSerializer):
             "gender",
             "intent",
             "gender_preferences",
+            "match_block_names",
             "date_of_birth",
             "age",
             "age_preference_enabled",
@@ -52,6 +54,9 @@ class UserSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_match_block_names(self, obj: User) -> list[str]:
+        return [bn.name for bn in obj.blocked_names.order_by("name")]
 
     def get_profile_photo_url(self, obj: User) -> str:
         return resolve_media_url(obj.profile_photo_url)
@@ -79,6 +84,14 @@ class UserProfileUpdateSerializer(serializers.Serializer):
         child=serializers.ChoiceField(choices=Gender.choices),
         required=False,
         allow_empty=True,
+    )
+    # Per-user match block list: bare name strings (full-list replace). The service
+    # trims, drops blanks, de-dupes and caps; here we bound the shape.
+    match_block_names = serializers.ListField(
+        child=serializers.CharField(max_length=MAX_BLOCK_NAME_LEN, allow_blank=True),
+        required=False,
+        allow_empty=True,
+        max_length=MAX_BLOCK_NAMES,
     )
     # DOB is accepted only during onboarding (set-once); the service enforces the
     # set-once rule and the minimum-age floor. Here we only shape it as a date.

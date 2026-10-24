@@ -145,3 +145,32 @@ class User(TimeStampedUUIDModel):
         today = timezone.now().date()
         dob = self.date_of_birth
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+class BlockedName(TimeStampedUUIDModel):
+    """A bare name string on a user's personal match block list.
+
+    Matchmaking filters out any candidate whose name matches an entry (token-based,
+    normalized). It is a name string only - never a user lookup - so it cannot
+    reveal whether that person is on the app. ``name`` is the raw entry (for the
+    settings UI); ``name_normalized`` is the lowercase, accent-stripped form used
+    for dedupe + matching.
+    """
+
+    user = models.ForeignKey(
+        "users.User", on_delete=models.CASCADE, related_name="blocked_names"
+    )
+    name = models.CharField(max_length=50)
+    name_normalized = models.CharField(max_length=50, db_index=True)
+
+    class Meta:
+        db_table = "blocked_names"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "name_normalized"], name="uniq_blocked_name_per_user"
+            ),
+        ]
+        indexes = [models.Index(fields=["user"], name="idx_blocked_name_user")]
+
+    def __str__(self) -> str:
+        return f"BlockedName<{self.id}> user={self.user_id} {self.name!r}"

@@ -63,37 +63,32 @@ CONFUSABLES_TABLE = str.maketrans(CONFUSABLES)
 # --- Block message tones (graduate by offence count) ------------------------
 TONES: dict[str, list[str]] = {
     "gentle": [
-        "Heads up. Matila keeps you both anonymous for now, so contact details, "
-        "socials and numbers can't be shared yet. You'll be able to once you both "
-        "choose to reveal. \U0001F49B",
+        "You're both anonymous for now, so contact details can't be shared yet. "
+        "You can once you both reveal. \U0001F49B",
     ],
     "firm": [
-        "Let's keep it inside Matila. Personal details can't be shared during the "
-        "anonymous chat. It's what keeps this safe for everyone.",
+        "Keep personal details out of the chat while you're anonymous. It keeps "
+        "everyone safe.",
     ],
     "serious": [
-        "We've had to block this again. Repeatedly trying to share or ask for "
-        "personal contact details can get your account limited. It's not because we "
-        "want to, but to keep everyone safe. Please keep the conversation here.",
+        "Blocked again. Repeatedly sharing contact details can limit your account. "
+        "Please keep it in the chat.",
     ],
     "ask": [
-        "You can't ask for their contact or socials yet. Matila stays anonymous "
-        "until you both choose to reveal. \U0001F49B",
+        "You can't ask for their contact yet. Wait until you both reveal. \U0001F49B",
     ],
     # meeting-coordination nudge
     "meet": [
-        "Planning to meet offline isn't available while you're both anonymous. "
-        "You can sort that out after you choose to reveal. \U0001F49B",
+        "Meeting up can't be arranged while you're anonymous. Sort it out after you "
+        "reveal. \U0001F49B",
     ],
     # non-English script nudge (message contained non-Latin letters)
     "english": [
-        "Let's keep the chat in English for now. Please retype your message using "
-        "the English keyboard. \U0001F49B",
+        "Please chat in English for now. \U0001F49B",
     ],
     # self-name nudge (the sender tried to reveal their own name)
     "name": [
-        "Hold on. Sharing your name gives away your identity before the reveal. "
-        "Keep it anonymous for now. You'll get to share it once you both reveal. "
+        "Sharing your name gives you away before the reveal. Keep it for later. "
         "\U0001F49B",
     ],
 }

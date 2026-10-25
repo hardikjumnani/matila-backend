@@ -3,7 +3,9 @@ Decision-round state-machine tests (the reveal/safe/extend/exit matrix).
 
 Payments are driven through the real prod paths: standard reveal via pay-with-coin,
 safe reveal / extension via Google Play verify (dev-bypass skips the Play API call).
-Both route success into RevealService.record_payment. See docs/REVEAL_FLOW_SPEC.md.
+These flow tests enable DIRECT_ACTION_PURCHASE_ENABLED so the direct Play path is
+usable here; production is coins-only (the flag is off). Both route success into
+RevealService.record_payment. See docs/REVEAL_FLOW_SPEC.md and docs/COINS_ONLY_PLAN.md.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ from django.utils import timezone
 from apps.chats.enums import ChatStatus, EndReason
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
+from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.models import FeatureFlag
 from apps.payments.enums import PaymentInitiatedFrom, PaymentPurpose
 from apps.payments.services.credit_service import CreditService
 from apps.payments.services.payment_service import PaymentService
@@ -49,6 +53,12 @@ def _user(gender: str) -> User:
 class DecisionFlowTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
+        # These flow tests fund safe-reveal / extend sides via the direct Play
+        # path, which is gated behind DIRECT_ACTION_PURCHASE_ENABLED (off by
+        # default). Enable it so the flow is drivable; prod stays coins-only.
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED, value=True
+        )
         notif = mock.MagicMock()
         self.chats = ChatService(notification_service=notif)
         self.reveal = RevealService(chat_service=self.chats, notification_service=notif)

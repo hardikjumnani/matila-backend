@@ -2,11 +2,14 @@
 Payment service.
 
 Owns ``payments`` (an append-only ledger) and orchestrates money/coin flows for
-the decision phase. Google Play is the only provider: chat-bound purchases
-(SAFE_REVEAL / CHAT_EXTENSION) and store bundles (CREDIT_PURCHASE) are verified
-against the Play Developer API; standard reveals are funded by coins. All effects
-mark the payer's side on the active DecisionRound via RevealService. Idempotent on
-the (unique) purchase token. See docs/REVEAL_FLOW_SPEC.md.
+the decision phase. Google Play is the only provider. The app is coins-only: a
+paid action (reveal / safe reveal / extend) is funded with coins (``pay_with_coin``),
+and real money buys only store coin packs (``purchase_bundle``, CREDIT_PURCHASE).
+Direct cash per action (``verify_google_play_purchase`` for a chat-bound purpose)
+is retired behind ``DIRECT_ACTION_PURCHASE_ENABLED`` (off by default); see
+docs/COINS_ONLY_PLAN.md. All paid effects mark the payer's side on the active
+DecisionRound via RevealService. Idempotent on the (unique) purchase token.
+See docs/REVEAL_FLOW_SPEC.md.
 
 ``PAYMENTS_DEV_BYPASS`` (dev only) skips the Play verification call so the harness
 can drive purchases with placeholder tokens; it never runs in production.
@@ -38,8 +41,9 @@ logger = logging.getLogger(__name__)
 
 _CURRENCY = "INR"
 
-# Chat-bound payable purposes and the FinalCall each corresponds to. All three can
-# be paid either with coins or directly in cash (Google Play) now.
+# Chat-bound payable purposes and the FinalCall each corresponds to. These are paid
+# with coins (pay_with_coin). Direct cash per action (verify_google_play_purchase)
+# is gated behind DIRECT_ACTION_PURCHASE_ENABLED, off by default (coins-only).
 _CHAT_BOUND = (
     PaymentPurpose.REVEAL,
     PaymentPurpose.SAFE_REVEAL,
@@ -139,6 +143,15 @@ class PaymentService:
 
         if not self._config.is_feature_enabled(FeatureFlagKey.PAYMENTS_ENABLED):
             return ServiceResult.fail("FORBIDDEN", "Payments are currently disabled.")
+        # Coins-only: direct cash per action is retired unless explicitly re-enabled.
+        # Fund the action by buying a coin pack (purchase_bundle) then pay_with_coin.
+        if not self._config.is_feature_enabled(
+            FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED
+        ):
+            return ServiceResult.fail(
+                "DIRECT_PURCHASE_DISABLED",
+                "Pay for this with coins instead.",
+            )
         if purpose not in _CHAT_BOUND:
             return ServiceResult.fail(
                 "VALIDATION_ERROR", "This purpose is not purchasable here."

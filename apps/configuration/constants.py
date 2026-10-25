@@ -61,6 +61,11 @@ class FeatureFlagKey:
     MUFFLE_ENABLED = "muffle_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
+    # Direct cash-per-action purchase (Google Play verify-purchase for
+    # reveal/safe-reveal/extend). Seeded OFF: the app is coins-only, so a paid
+    # action is funded by buying a coin pack and spending coins. Flip on only to
+    # restore the two-tier (coins OR direct cash) model. See docs/COINS_ONLY_PLAN.md.
+    DIRECT_ACTION_PURCHASE_ENABLED = "direct_action_purchase_enabled"
 
 
 # Fallback values used when a key has not been seeded in the database.
@@ -150,4 +155,7 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     FeatureFlagKey.VEIL_ENABLED: True,
     FeatureFlagKey.MUFFLE_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
+    # OFF by default: coins-only. Direct cash-per-action is retired; funding an
+    # action means buying a coin pack then spending coins. See COINS_ONLY_PLAN.md.
+    FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED: False,
 }

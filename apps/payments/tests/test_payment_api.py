@@ -13,6 +13,8 @@ from rest_framework.test import APIClient
 
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
+from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.models import FeatureFlag
 from apps.reveal.enums import DecisionChoice
 from apps.reveal.services.reveal_service import RevealService
 from apps.users.enums import Gender
@@ -80,6 +82,10 @@ class PaymentApiTests(TestCase):
 
     @override_settings(PAYMENTS_DEV_BYPASS=True)
     def test_verify_purchase_endpoint(self) -> None:
+        # Direct cash per action is behind a flag (off by default); enable it here.
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED, value=True
+        )
         # Boy REVEAL + girl SAFE_REVEAL → SAFE_REVEAL payment phase.
         self.reveal.submit_decision(
             chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
@@ -99,6 +105,27 @@ class PaymentApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.json()["data"]["amount_in_paise"], 5000)
+
+    def test_verify_purchase_blocked_by_default(self) -> None:
+        # Coins-only: with the flag off (default) the direct cash endpoint is 403.
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.SAFE_REVEAL
+        )
+        resp = _client(self.boy).post(
+            "/api/v1/payments/verify-purchase",
+            {
+                "chat_id": str(self.chat.id),
+                "purpose": "SAFE_REVEAL",
+                "product_id": "safe_reveal_male",
+                "purchase_token": "tok_boy_1",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["error"]["code"], "DIRECT_PURCHASE_DISABLED")
 
     def test_pay_with_coin_endpoint(self) -> None:
         from apps.payments.services.credit_service import CreditService

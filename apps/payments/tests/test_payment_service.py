@@ -13,6 +13,8 @@ from django.utils import timezone
 from apps.chats.enums import ChatStatus
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
+from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.models import FeatureFlag
 from apps.payments.enums import PaymentInitiatedFrom, PaymentPurpose
 from apps.payments.models import Payment
 from apps.payments.services.credit_service import CreditService
@@ -43,6 +45,11 @@ def _play_stub(**_kwargs):
 class PaymentServiceTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
+        # Some tests here drive the direct cash-per-action path, which is gated
+        # behind DIRECT_ACTION_PURCHASE_ENABLED (off by default). Turn it on.
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED, value=True
+        )
         notif = mock.MagicMock()
         self.chats = ChatService(notification_service=notif)
         self.reveal = RevealService(chat_service=self.chats, notification_service=notif)

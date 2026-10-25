@@ -41,6 +41,8 @@ ERROR_STATUS_MAP: dict[str, int] = {
     "INSUFFICIENT_COINS": http.HTTP_409_CONFLICT,
     "ALREADY_PAID": http.HTTP_409_CONFLICT,
     "NO_ACTIVE_PAYMENT": http.HTTP_409_CONFLICT,
+    # Coins-only: direct cash-per-action is disabled; the client should pay with coins.
+    "DIRECT_PURCHASE_DISABLED": http.HTTP_403_FORBIDDEN,
     "MESSAGE_TOO_LONG": http.HTTP_400_BAD_REQUEST,
     "INVALID_REPLY_TARGET": http.HTTP_400_BAD_REQUEST,
     # Veil anti-leakage engine blocked an outgoing message (contact/PII leak).

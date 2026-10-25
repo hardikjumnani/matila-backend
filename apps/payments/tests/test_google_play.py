@@ -13,6 +13,8 @@ from django.utils import timezone
 from apps.chats.enums import ChatStatus
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
+from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.models import FeatureFlag
 from apps.payments.enums import PaymentInitiatedFrom, PaymentProvider, PaymentPurpose
 from apps.payments.gateway_play import InvalidPurchase
 from apps.payments.models import Payment
@@ -42,6 +44,11 @@ def _stub(**_kwargs):
 class GooglePlayPaymentTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
+        # These tests exercise the direct cash-per-action path, which is gated
+        # behind DIRECT_ACTION_PURCHASE_ENABLED (off by default). Turn it on.
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED, value=True
+        )
         notif = mock.MagicMock()
         self.chats = ChatService(notification_service=notif)
         self.reveal = RevealService(chat_service=self.chats, notification_service=notif)
@@ -116,3 +123,53 @@ class GooglePlayPaymentTests(TestCase):
             self.boy, "tok", "standard_reveal_3", purpose=PaymentPurpose.CREDIT_PURCHASE
         )
         self.assertEqual(result.error_code, "VALIDATION_ERROR")
+
+
+class DirectActionPurchaseFlagTests(TestCase):
+    """Coins-only: direct cash per action is gated behind
+    DIRECT_ACTION_PURCHASE_ENABLED, which is off by default."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        notif = mock.MagicMock()
+        self.chats = ChatService(notification_service=notif)
+        self.reveal = RevealService(chat_service=self.chats, notification_service=notif)
+        self.service = PaymentService(
+            chat_service=self.chats, reveal_service=self.reveal, notification_service=notif
+        )
+        self.boy = _user(Gender.MALE)
+        self.girl = _user(Gender.FEMALE)
+        self.chat = self.chats.create_chat(self.boy, self.girl).data
+        Chat.objects.filter(id=self.chat.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
+        # Reach a SAFE_REVEAL payment phase.
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(self.chat.id), user=self.girl, choice=DecisionChoice.SAFE_REVEAL
+        )
+
+    def _verify(self):
+        return self.service.verify_google_play_purchase(
+            user=self.boy,
+            chat_id=str(self.chat.id),
+            purpose=PaymentPurpose.SAFE_REVEAL,
+            product_id="safe_reveal_male",
+            purchase_token="tok",
+            initiated_from=PaymentInitiatedFrom.CHAT_SCREEN,
+        )
+
+    def test_direct_purchase_disabled_by_default(self) -> None:
+        # No flag row: coins-only, so the direct cash path is refused up front.
+        result = self._verify()
+        self.assertEqual(result.error_code, "DIRECT_PURCHASE_DISABLED")
+
+    def test_direct_purchase_allowed_when_flag_on(self) -> None:
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED, value=True
+        )
+        with mock.patch(_VERIFY_PLAY, side_effect=_stub):
+            result = self._verify()
+        self.assertTrue(result.success)

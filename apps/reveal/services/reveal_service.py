@@ -563,6 +563,7 @@ class RevealService:
                 reason=CoinLedgerReason.CANCELLATION_CREDIT,
                 idempotency_key=f"cancel:{round_.id}:{pd.user_id}",
                 chat=round_.chat,
+                purpose=purpose,
             )
 
     # -- State read (reconnection) ------------------------------------------

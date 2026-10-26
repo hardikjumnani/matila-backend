@@ -367,3 +367,66 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+_PURPOSE_LABEL = {
+    "REVEAL": "reveal",
+    "SAFE_REVEAL": "safe reveal",
+    "CHAT_EXTENSION": "chat extension",
+}
+
+
+class CoinLedgerAdminSerializer(serializers.Serializer):
+    """One coin-ledger row for the admin per-user coin tab. Carries a ready-to-show
+    ``label`` and the running ``balance_after`` so the frontend renders a timeline
+    with no math of its own, plus pack provenance via the linked Payment."""
+
+    id = serializers.UUIDField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    direction = serializers.SerializerMethodField()
+    delta = serializers.IntegerField(read_only=True)
+    balance_after = serializers.IntegerField(read_only=True)
+    reason = serializers.CharField(read_only=True)
+    purpose = serializers.CharField(read_only=True)
+    chat_id = serializers.UUIDField(read_only=True, allow_null=True)
+    note = serializers.CharField(read_only=True)
+    label = serializers.SerializerMethodField()
+    payment = serializers.SerializerMethodField()
+
+    def get_direction(self, obj) -> str:
+        return "credit" if obj.delta >= 0 else "spend"
+
+    def get_payment(self, obj):
+        p = getattr(obj, "payment", None)
+        if p is None:
+            return None
+        meta = p.metadata or {}
+        return {
+            "amount_in_paise": p.amount_in_paise,
+            "product_id": meta.get("product_id"),
+            "coins": meta.get("coins"),
+            "provider_payment_id": p.provider_payment_id,
+            "status": p.status,
+        }
+
+    def get_label(self, obj) -> str:
+        coins = abs(obj.delta)
+        if obj.reason == "BUNDLE_PURCHASE":
+            p = getattr(obj, "payment", None)
+            sku = (p.metadata or {}).get("product_id") if p else None
+            if p and p.amount_in_paise:
+                rupees = p.amount_in_paise / 100
+                if sku:
+                    return f"Bought {coins} coins ({sku}, Rs {rupees:.0f})"
+                return f"Bought {coins} coins (Rs {rupees:.0f})"
+            return f"Bought {coins} coins"
+        if obj.reason == "ACTION_CONSUME":
+            return f"Spent {coins} coins on {_PURPOSE_LABEL.get(obj.purpose, 'an action')}"
+        if obj.reason == "CANCELLATION_CREDIT":
+            act = _PURPOSE_LABEL.get(obj.purpose, "a cancelled action")
+            return f"Refunded {coins} coins ({act} cancelled)"
+        if obj.reason == "ADMIN_ADJUST":
+            verb = "added" if obj.delta >= 0 else "deducted"
+            note = f" (note: {obj.note})" if obj.note else ""
+            return f"Admin {verb} {coins} coins{note}"
+        return f"{obj.delta:+d} coins"

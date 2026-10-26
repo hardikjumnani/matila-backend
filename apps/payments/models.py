@@ -128,6 +128,12 @@ class CoinLedger(UUIDModel):
     delta = models.IntegerField()  # +N credit/purchase, -1 consume
     balance_after = models.PositiveIntegerField()
     reason = models.CharField(max_length=25, choices=CoinLedgerReason.choices)
+    # The action a spend/refund was for (REVEAL / SAFE_REVEAL / CHAT_EXTENSION).
+    # First-class so the admin coin ledger can show "what this coin bought" even
+    # after the chat is deleted. Null for coin-pack purchases and seed credits.
+    purpose = models.CharField(max_length=15, blank=True, default="")
+    # Free-text note (e.g. an admin adjustment reason).
+    note = models.CharField(max_length=255, blank=True, default="")
 
     chat = models.ForeignKey(
         "chats.Chat",

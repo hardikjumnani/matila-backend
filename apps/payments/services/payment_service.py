@@ -312,6 +312,7 @@ class PaymentService:
             amount=cost,
             idempotency_key=f"consume:{round_id}:{user.id}",
             chat=chat,
+            purpose=getattr(purpose, "value", str(purpose)),
         )
         if spent.failed:
             return ServiceResult.fail(spent.error_code, spent.error_message)

@@ -18,6 +18,7 @@ from apps.admin_panel.api.serializers import (
     AdminUserSerializer,
     AppConfigSerializer,
     AuditLogSerializer,
+    CoinLedgerAdminSerializer,
     FeatureFlagSerializer,
     SetValueSerializer,
 )
@@ -43,15 +44,26 @@ class AdminUserListView(ListAPIView):
     serializer_class = AdminUserSerializer
 
     def get_queryset(self):
+        import uuid as _uuid
+
         from django.db.models import Q
 
         params = self.request.query_params
         queryset = User.objects.all().order_by("-created_at")
         search = params.get("q")
         if search:
-            queryset = queryset.filter(
-                Q(college_email__icontains=search) | Q(full_name__icontains=search)
+            # Multiple identifiers: name / email (substring) + firebase_uid + id (exact).
+            cond = (
+                Q(college_email__icontains=search)
+                | Q(full_name__icontains=search)
+                | Q(firebase_uid__iexact=search)
             )
+            try:
+                _uuid.UUID(str(search))
+                cond |= Q(id=search)
+            except (ValueError, TypeError):
+                pass
+            queryset = queryset.filter(cond)
         if account_status := params.get("account_status"):
             queryset = queryset.filter(account_status=account_status.upper())
         if verification_status := params.get("verification_status"):
@@ -79,6 +91,57 @@ class AdminUserDetailView(AdminAPIView):
         }
         return Response(
             {"user": AdminUserSerializer(user).data, "chat_summary": summary}
+        )
+
+
+class AdminUserCoinDetailView(AdminAPIView):
+    """GET /admin/users/{id}/coins — wallet balance, lifetime totals, recent ledger.
+
+    A never-transacted user returns a zeroed overview (everyone starts at zero), not
+    a 404. See docs/ADMIN_COIN_LEDGER_TAB_PLAN.md."""
+
+    @extend_schema(responses=OpenApiResponse(description="User coin overview."))
+    def get(self, request: Request, user_id: str) -> Response:
+        from apps.payments.services.credit_service import CreditService
+
+        user = User.objects.filter(id=user_id).first()
+        if user is None:
+            return envelope_error("RESOURCE_NOT_FOUND", "User not found.", 404)
+        credits = CreditService()
+        overview = credits.get_coin_overview(user)
+        recent = credits.get_ledger_queryset(user)[:10]
+        return Response(
+            {
+                "user": {
+                    "id": str(user.id),
+                    "full_name": user.full_name,
+                    "college_email": user.college_email,
+                    "account_status": user.account_status,
+                },
+                "wallet": {
+                    "coins": overview["coins"],
+                    "has_held_coins": overview["has_held_coins"],
+                    "updated_at": overview["wallet_updated_at"],
+                },
+                "totals": overview["totals"],
+                "recent_ledger": CoinLedgerAdminSerializer(recent, many=True).data,
+            }
+        )
+
+
+class AdminUserCoinLedgerListView(ListAPIView):
+    """GET /admin/users/{id}/coin-ledger — the full coin history (cursor-paginated)."""
+
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = CoinLedgerAdminSerializer
+
+    def get_queryset(self):
+        from apps.payments.models import CoinLedger
+
+        return (
+            CoinLedger.objects.filter(wallet__user_id=self.kwargs["user_id"])
+            .select_related("payment", "chat")
+            .order_by("-created_at")
         )
 
 

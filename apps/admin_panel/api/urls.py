@@ -17,6 +17,8 @@ from apps.admin_panel.api.management_views import (
     AdminFeatureFlagUpdateView,
     AdminUserActivateView,
     AdminUserBanView,
+    AdminUserCoinDetailView,
+    AdminUserCoinLedgerListView,
     AdminUserDetailView,
     AdminUserEraseView,
     AdminUserListView,
@@ -121,6 +123,16 @@ urlpatterns = [
         "admin/users/<uuid:user_id>/erase",
         AdminUserEraseView.as_view(),
         name="user-erase",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/coins",
+        AdminUserCoinDetailView.as_view(),
+        name="user-coins",
+    ),
+    path(
+        "admin/users/<uuid:user_id>/coin-ledger",
+        AdminUserCoinLedgerListView.as_view(),
+        name="user-coin-ledger",
     ),
     # Feature flags
     path(

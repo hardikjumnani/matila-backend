@@ -111,7 +111,10 @@ class ScanBlockTests(SimpleTestCase):
         self._blocked("add me on snap", LeakCategory.STEERING.value)
 
     def test_meet_up(self):
-        self._blocked("lets meet up tomorrow")
+        # A meetup with a PLACE blocks (INVITE + DESTINATION). INVITE + TIME with no
+        # place is intentionally NOT blocked (v2.3 meeting-precision fix); it is an
+        # FP-prone case routed to the suspicion engine instead.
+        self._blocked("lets meet up at the canteen tomorrow")
 
     # --- leet obfuscation -------------------------------------------------
     def test_leet_platform_handle(self):

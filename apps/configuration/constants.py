@@ -13,6 +13,14 @@ from __future__ import annotations
 
 from typing import Any
 
+# Single source of truth for the suspicion engine's weights / decay / tiers lives
+# with the engine data (pure module, no Django imports), so config can never drift.
+from apps.privacy.suspicion_data import (
+    DEFAULT_DECAY_HALF_LIFE_DAYS as _SUSPICION_HALF_LIFE,
+    DEFAULT_SIGNAL_WEIGHTS as _SUSPICION_WEIGHTS,
+    DEFAULT_TIER_THRESHOLDS as _SUSPICION_TIERS,
+)
+
 
 class AppConfigKey:
     # Direct-cash prices (paise) per action side.
@@ -50,6 +58,8 @@ class AppConfigKey:
     SUSPICION_SIGNAL_WEIGHTS = "suspicion_signal_weights"  # {signal: weight}
     SUSPICION_MIN_RECORD_WEIGHT = "suspicion_min_record_weight"  # skip trivial noise
     SUSPICION_ATTENTION_SCORE = "suspicion_attention_score"  # per-user audit threshold
+    SUSPICION_DECAY_HALF_LIFE_DAYS = "suspicion_decay_half_life_days"  # priority decay
+    SUSPICION_TIER_THRESHOLDS = "suspicion_tier_thresholds"  # {WATCH, ELEVATED, HIGH}
 
 
 class FeatureFlagKey:
@@ -107,15 +117,13 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     # CHOSEN: Suspicion engine (second-hand Veil). Non-blocking; records soft
     # signals for admin review. Per-signal weights + record/attention thresholds
     # are runtime-tunable so the admin feed can be kept usable without a deploy.
-    AppConfigKey.SUSPICION_SIGNAL_WEIGHTS: {
-        "NON_LATIN_SCRIPT": 2,
-        "ROMANIZED_INDIC": 2,
-        "GIBBERISH": 2,
-        "OBFUSCATION": 3,
-        "NEAR_MISS": 3,
-    },
+    # Weights, decay and tier thresholds come from the engine's single source of
+    # truth (apps/privacy/suspicion_data.py) so the two can never drift.
+    AppConfigKey.SUSPICION_SIGNAL_WEIGHTS: dict(_SUSPICION_WEIGHTS),
     AppConfigKey.SUSPICION_MIN_RECORD_WEIGHT: 2,
     AppConfigKey.SUSPICION_ATTENTION_SCORE: 8,
+    AppConfigKey.SUSPICION_DECAY_HALF_LIFE_DAYS: _SUSPICION_HALF_LIFE,
+    AppConfigKey.SUSPICION_TIER_THRESHOLDS: dict(_SUSPICION_TIERS),
     # CHOSEN: gesture instructions the verification flow can request. Each entry is
     # {code, label, emoji}: the CODE is stored on verification_requests.gesture_type
     # (stable identifier); label + emoji are presentation, served to the client so

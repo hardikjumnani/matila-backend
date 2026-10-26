@@ -42,6 +42,15 @@ _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t
                        "@": "a", "$": "s"})
 _TOKEN_RE = re.compile(r"[a-z]+|\d+")
 
+# Leet letters -> their digit, for the leet-to-digit phone pass. Applied ONLY to a
+# token that already contains a real digit and whose letters are ALL leet-mappable
+# (e.g. "9o765432lo"), then gated by the full mobile validator. A pure-letter word
+# is never folded (so "goose goose" cannot masquerade as a number), which keeps
+# the pass zero false-positive.
+_LEET_DIGIT = {"o": "0", "i": "1", "l": "1", "z": "2", "e": "3", "a": "4",
+               "s": "5", "t": "7", "b": "8", "g": "9", "q": "9"}
+_MIXED_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
 # Structured detector regexes (run on the exact fold_base view).
 _PHONE_RE = re.compile(r"[6-9]\d{9}")
 _PLAIN_EMAIL_RE = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}")
@@ -164,6 +173,22 @@ def extract_digits(text: str) -> str:
             repeat = 1
         else:
             repeat = 1
+    return "".join(out)
+
+
+def extract_leet_digits(text: str) -> str:
+    """Digits recovered from mixed letter+digit tokens where the letters are leet
+    stand-ins for digits ("9o765432lo" -> "9876543210"). Only tokens that already
+    contain a real digit AND whose every character is a digit or a leet-digit
+    letter are folded; pure-letter words are ignored. The sole gate downstream is
+    the mobile validator, so a non-phone fold never blocks (zero-FP by design)."""
+    folded = normalize.prefold_numeric(text)
+    out: list[str] = []
+    for tok in _MIXED_TOKEN_RE.findall(folded):
+        if not any(c.isdigit() for c in tok):
+            continue  # pure-letter token: never leet-fold it into digits
+        if all(c.isdigit() or c in _LEET_DIGIT for c in tok):
+            out.append("".join(c if c.isdigit() else _LEET_DIGIT[c] for c in tok))
     return "".join(out)
 
 
@@ -360,6 +385,16 @@ class LeakGuard:
                        _PHONE_RE.search(ctx.tally_digits).group(0))
         if _PHONE_RE.search(ctx.combined_digits):
             return Hit(LeakCategory.PHONE.value, _HIGH, "reassembler", "<reassembled>")
+        # Reversed digits ("read it backwards: 0123456789"): the forward run may not
+        # match the mobile pattern but the reverse does. Still gated by _PHONE_RE.
+        rev = _PHONE_RE.search(ctx.combined_digits[::-1])
+        if rev:
+            return Hit(LeakCategory.PHONE.value, _HIGH, "reversed", rev.group(0))
+        # Leet-to-digit: a number disguised with leet letters inside mixed tokens
+        # ("9o765432lo"). extract_leet_digits only folds digit-bearing tokens.
+        leet = _PHONE_RE.search(extract_leet_digits(ctx.raw))
+        if leet:
+            return Hit(LeakCategory.PHONE.value, _HIGH, "leet_digits", leet.group(0))
         if normalize.digit_count(ctx.prefolded) >= _PHONE_MIN_DIGITS \
                 and self._phonenumbers_hit(ctx.prefolded):
             return Hit(LeakCategory.PHONE.value, _HIGH, "libphonenumber", "<intl>")
@@ -432,7 +467,12 @@ class LeakGuard:
     def _meeting_blocks(present: set[str]) -> bool:
         if "LOCATION_PIN" in present:
             return True
-        if "INVITE" in present and present & {"DESTINATION", "TIME", "DIRECTIONS"}:
+        # INVITE + TIME with NO place is deliberately NOT a block: it false-positives
+        # on ordinary / poetic lines ("kal milte hain", "let's meet tomorrow"). A
+        # real actionable meetup needs a place or directions. See
+        # docs/VEIL_MEETING_PRECISION_PLAN.md. The sub-threshold INVITE+TIME case is
+        # routed to the suspicion engine instead (CONTACT_INTENT_SOFT class).
+        if "INVITE" in present and present & {"DESTINATION", "DIRECTIONS"}:
             return True
         if "DIRECTIONS" in present and "DESTINATION" in present:
             return True
@@ -474,6 +514,18 @@ class LeakGuard:
             if needle and (needle in collapsed or needle in collapsed_leet):
                 return Hit(
                     LeakCategory.SELF_NAME.value, _HIGH, "self_name_glued", tok
+                )
+        # Tier 3 - reversed name ("kidrah" for "hardik", "uhsnamih" for "himanshu").
+        # Only long (>= glue floor) tokens get this, so a short reversed string can
+        # never collide with ordinary words (zero-FP), and self-name-only so a
+        # partner is never blocked.
+        for tok in tokens:
+            if len(tok) < _SELF_NAME_GLUE_MIN:
+                continue
+            rev = normalize.collapse_all(tok)[::-1]
+            if rev and (rev in collapsed or rev in collapsed_leet):
+                return Hit(
+                    LeakCategory.SELF_NAME.value, _HIGH, "self_name_reversed", tok
                 )
         return None
 

@@ -163,6 +163,25 @@ class AdminSuspicionReviewView(AdminAPIView):
         return Response(result.data)
 
 
+class AdminSuspicionResetView(AdminAPIView):
+    """POST /admin/safety/users/{user_id}/suspicion/reset: clear a user's
+    accumulated suspicion (score + priority + tier) and mark it CLEARED. Lets an
+    admin wipe a false accumulation in one click. Advisory only; audited."""
+
+    def post(self, request: Request, user_id: str) -> Response:
+        user = User.objects.filter(id=user_id).first()
+        if user is None:
+            return envelope_error("RESOURCE_NOT_FOUND", "User not found.", 404)
+        result = TrustSafetyService().reset_suspicion_score(
+            user=user,
+            admin_id=str(request.user.id),
+            notes=str(request.data.get("notes", "") or ""),
+        )
+        if result.failed:
+            return service_failure_response(result)
+        return Response(result.data)
+
+
 class AdminSafetyStatsView(AdminAPIView):
     """GET /admin/safety/stats: headline T&S counts for the dashboard."""
 

@@ -119,6 +119,12 @@ class MessageService:
         if chat.current_phase == ChatPhase.ANONYMOUS:
             decision = self._veil.inspect_text(chat=chat, sender=sender, text=content)
             if decision.blocked:
+                # Record the hard-block as the strongest soft signal (backend/admin
+                # only; the user still only sees the block message). Fail-open.
+                self._suspicion.inspect(
+                    chat=chat, sender=sender, text=content,
+                    leak_blocked=True, leak_category=decision.category,
+                )
                 return ServiceResult.fail("MESSAGE_BLOCKED", decision.user_message)
             # Second-hand Veil: non-blocking soft-signal scan on the allowed
             # message (admin-only; never affects the user). Fail-open internally.

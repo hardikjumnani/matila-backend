@@ -42,23 +42,57 @@ class SuspicionGuardTests(SimpleTestCase):
         self.assertIn("GIBBERISH", self._signals("ytjkacvzwq here"))  # implausible
 
     def test_obfuscation_split_word(self):
-        self.assertIn("OBFUSCATION", self._signals("reach me h.e.l.l.o"))
+        self.assertIn("OBFUSCATION_SPLIT", self._signals("reach me h.e.l.l.o"))
 
     def test_obfuscation_zero_width(self):
-        self.assertIn("OBFUSCATION", self._signals("hel​lo there"))
+        self.assertIn("OBFUSCATION_INVISIBLE", self._signals("hel​lo there"))
 
     def test_obfuscation_confusable(self):
         # Cyrillic 'а' / 'е' render like Latin.
-        self.assertIn("OBFUSCATION", self._signals("sаmе text"))
+        self.assertIn("OBFUSCATION_INVISIBLE", self._signals("sаmе text"))
 
-    def test_near_miss_digit_run(self):
-        self.assertIn("NEAR_MISS", self._signals("my id 9876543"))  # 7 digits
+    def test_near_phone_digit_run(self):
+        self.assertIn("NEAR_PHONE", self._signals("my id 9876543"))  # 7 digits
 
-    def test_near_miss_brand(self):
-        self.assertIn("NEAR_MISS", self._signals("ping me on insta later"))
+    def test_near_phone_wrong_prefix(self):
+        # 10 digits that are NOT a valid mobile (starts 0) -> near-phone, not a block.
+        self.assertIn("NEAR_PHONE", self._signals("code 0123456789"))
+
+    def test_brand_mention(self):
+        self.assertIn("BRAND_MENTION", self._signals("ping me on insta later"))
+
+    def test_handle_soft_common_word_value(self):
+        # "my insta is cool" — letters-only value Veil cannot hard-block.
+        self.assertIn("HANDLE_SOFT", self._signals("my insta is cool"))
+
+    def test_contact_soft_no_platform(self):
+        self.assertIn("CONTACT_SOFT", self._signals("just find me somewhere ok"))
+
+    def test_partial_spelled_digits(self):
+        self.assertIn("PARTIAL_DIGITS", self._signals("nine four four later"))
+
+    def test_selfname_soft_reversed_short(self):
+        # "isha" (4) reversed is "ahsi"; Veil only hard-blocks reversed names >= 6.
+        self.assertIn("SELFNAME_SOFT", self._signals("ahsi here", sender_name="Isha Roy"))
+
+    def test_selfname_soft_disemvowelled(self):
+        self.assertIn(
+            "SELFNAME_SOFT",
+            self._signals("its hrdk here", sender_name="Hardik Jumnani"),
+        )
+
+    def test_digit_drip_cadence_cross_message(self):
+        signals = self._signals(
+            "4", prior_messages=("9", "8", "7"),
+        )
+        self.assertIn("DIGIT_DRIP", signals)
+
+    def test_romanized_indic_is_ambient_only(self):
+        # Romanized Hindi fires the ambient signal but contributes 0 priority.
+        v = self.g.scan("chalo yaar kaise ho")
+        self.assertEqual(v.top_signal, "ROMANIZED_INDIC")
 
     def test_self_name_not_flagged_as_gibberish(self):
-        # An unusual own-name token must not be scored as gibberish.
         signals = self._signals("qwrtzxc", sender_name="Qwrtzxc Lastname")
         self.assertNotIn("GIBBERISH", signals)
 

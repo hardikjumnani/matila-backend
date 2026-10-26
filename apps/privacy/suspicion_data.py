@@ -5,30 +5,93 @@ compiles from. Pure data only (no AI). Bump ``SUSPICION_RULE_VERSION`` whenever
 any list changes.
 
 The suspicion layer NEVER blocks a message; it emits weighted soft signals that
-are recorded for admin assessment and for tuning Veil. Precision matters less
-than it does for Veil (a false positive here only adds an admin-review row, it
-does not hinder a user), but the lists are still kept conservative to keep the
-admin feed usable.
+are recorded for admin assessment and for tuning Veil. It is backend-only and
+admin-only; the user is never shown anything. A false positive here only adds an
+admin-review row, so these lists can be broader than Veil's, but they are kept
+CLASSED so that "ambient" behaviour (romanized Hindi, non-Latin, gibberish) which
+is normal for this user base never drives a user up the admin queue.
 """
 
 from __future__ import annotations
 
-SUSPICION_RULE_VERSION = "2026.10.23-suspicion-v1"
+SUSPICION_RULE_VERSION = "2026.10.26-suspicion-v2"
+
+# -- Signal classes -----------------------------------------------------------
+# ambient     = normal for this user base (romanized Hindi, non-Latin, gibberish).
+#               Recorded for context but EXCLUDED from the priority (ranking/tier)
+#               score, so a legitimate heavy Hindi-romanizer never climbs the queue.
+# structural  = obfuscation mechanics (invisible chars, separator splits, leet).
+# pii         = sub-threshold PII-leak tells (the ones that matter).
+# behavioral  = cross-message / cadence patterns + a recorded Veil hard-block.
+CLASS_AMBIENT = "ambient"
+CLASS_STRUCTURAL = "structural"
+CLASS_PII = "pii"
+CLASS_BEHAVIORAL = "behavioral"
+
+SIGNAL_CLASS: dict[str, str] = {
+    "NON_LATIN_SCRIPT": CLASS_AMBIENT,
+    "ROMANIZED_INDIC": CLASS_AMBIENT,
+    "GIBBERISH": CLASS_AMBIENT,
+    "OBFUSCATION_INVISIBLE": CLASS_STRUCTURAL,
+    "OBFUSCATION_SPLIT": CLASS_STRUCTURAL,
+    "OBFUSCATION_LEET": CLASS_STRUCTURAL,
+    "NEAR_PHONE": CLASS_PII,
+    "PARTIAL_DIGITS": CLASS_PII,
+    "DIGIT_DENSITY": CLASS_PII,
+    "BRAND_MENTION": CLASS_PII,
+    "HANDLE_SOFT": CLASS_PII,
+    "SELFNAME_SOFT": CLASS_PII,
+    "REVERSAL_HINT": CLASS_PII,
+    "CONTACT_SOFT": CLASS_PII,
+    "ENTROPY_TOKEN": CLASS_PII,
+    "DIGIT_DRIP": CLASS_BEHAVIORAL,
+    "CHAR_BURST": CLASS_BEHAVIORAL,
+    "CROSS_MESSAGE": CLASS_BEHAVIORAL,
+    "BLOCKED_LEAK": CLASS_BEHAVIORAL,
+}
+
+# Signals excluded from the priority (tier/ranking) score. They still record.
+AMBIENT_SIGNALS: frozenset[str] = frozenset(
+    s for s, c in SIGNAL_CLASS.items() if c == CLASS_AMBIENT
+)
 
 # Default per-signal weights (admin-overridable via app_config
 # ``suspicion_signal_weights``). A message's score is the sum of the weights of
-# the DISTINCT signals it triggers (each signal fires at most once).
+# the DISTINCT signals it triggers (each signal fires at most once). SINGLE SOURCE
+# OF TRUTH: configuration defaults import this map (no duplication).
 DEFAULT_SIGNAL_WEIGHTS: dict[str, int] = {
-    "NON_LATIN_SCRIPT": 2,
-    "ROMANIZED_INDIC": 2,
+    # ambient (down-weighted; excluded from the priority score anyway)
+    "NON_LATIN_SCRIPT": 1,
+    "ROMANIZED_INDIC": 1,
     "GIBBERISH": 2,
-    "OBFUSCATION": 3,
-    "NEAR_MISS": 3,
+    # structural
+    "OBFUSCATION_INVISIBLE": 3,
+    "OBFUSCATION_SPLIT": 2,
+    "OBFUSCATION_LEET": 2,
+    # pii
+    "NEAR_PHONE": 3,
+    "PARTIAL_DIGITS": 3,
+    "DIGIT_DENSITY": 2,
+    "BRAND_MENTION": 2,
+    "HANDLE_SOFT": 3,
+    "SELFNAME_SOFT": 4,
+    "REVERSAL_HINT": 2,
+    "CONTACT_SOFT": 2,
+    "ENTROPY_TOKEN": 2,
+    # behavioral
+    "DIGIT_DRIP": 3,
+    "CHAR_BURST": 2,
+    "CROSS_MESSAGE": 4,
+    "BLOCKED_LEAK": 5,
 }
 
+# Decay + tier defaults (admin-overridable). The priority score decays with this
+# half-life so it reflects CURRENT risk, not a lifetime tally; tiers are review
+# LABELS only (they never block or act on the account).
+DEFAULT_DECAY_HALF_LIFE_DAYS = 14
+DEFAULT_TIER_THRESHOLDS: dict[str, int] = {"WATCH": 3, "ELEVATED": 8, "HIGH": 16}
+
 # -- Non-Latin script ranges (letters only; emoji/symbols are excluded) -------
-# Presence of any character in these blocks fires NON_LATIN_SCRIPT. Accented
-# Latin (Latin-1 Supplement "café", "naïve") is intentionally NOT here.
 NON_LATIN_RANGES: tuple[tuple[int, int], ...] = (
     (0x0370, 0x03FF),  # Greek
     (0x0400, 0x04FF),  # Cyrillic
@@ -53,11 +116,6 @@ ZERO_WIDTH_CODES: frozenset[int] = frozenset(
 )
 
 # -- Romanized Indic / code-mix markers --------------------------------------
-# Distinctive romanized Hindi/Tamil/Telugu function words that essentially never
-# appear in ordinary English. A single marker fires ROMANIZED_INDIC. Ambiguous
-# tokens that collide with English ("sun", "me", "to", "he") are deliberately
-# excluded. There is no standard romanization, so this is a signal, not a
-# classifier (see the plan's research notes).
 ROMANIZED_INDIC_MARKERS: frozenset[str] = frozenset(
     {
         # Hindi / Urdu
@@ -76,10 +134,10 @@ ROMANIZED_INDIC_MARKERS: frozenset[str] = frozenset(
     }
 )
 
-# -- Platform brand words for the NEAR_MISS signal ----------------------------
-# Only distinctive brand names (not generic words like "number"/"email", which
-# are too common for a soft signal). A brand mention that did not trip a Veil
-# block is a borderline worth noting.
+# -- Platform brand words for BRAND_MENTION / HANDLE_SOFT ----------------------
+# Distinctive brand names (not generic nouns like "number"/"email", which are too
+# common for a soft signal). A bare brand mention is BRAND_MENTION; a brand +
+# connector + a letters-only value ("my insta is cool") is HANDLE_SOFT.
 BRAND_WORDS: frozenset[str] = frozenset(
     {
         "instagram", "insta", "instagrm", "snapchat", "snap", "whatsapp",
@@ -88,10 +146,30 @@ BRAND_WORDS: frozenset[str] = frozenset(
     }
 )
 
+# -- Contact-intent phrases (CONTACT_SOFT) ------------------------------------
+# Ask/steer phrasing with NO platform and NO number: too weak for a Veil block
+# ("find me", "text me") but worth a soft note. Matched as substrings of the
+# folded view, so glued forms ("textme") are covered too.
+CONTACT_INTENT_MARKERS: tuple[str, ...] = (
+    "find me", "add me", "text me", "dm me", "message me", "msg me", "ping me",
+    "reach me", "hit me up", "follow me", "catch me", "search my", "same user",
+    "same username", "find my", "look me up",
+)
+
+# -- Spelled-digit collision words (PARTIAL_DIGITS only) ----------------------
+# Number words that collide with English, deliberately kept OUT of Veil's phone
+# reassembler. Here they only count toward the soft PARTIAL_DIGITS signal.
+COLLISION_DIGITS: frozenset[str] = frozenset(
+    {"do", "to", "be", "for", "ate", "won", "tree", "fife", "oh"}
+)
+
+# Reversal cue words (REVERSAL_HINT), romanized included.
+REVERSAL_CUES: tuple[str, ...] = ("backward", "backwards", "reverse", "reversed",
+                                  "ulta", "ultaa", "palindrome")
+
 # -- Gibberish detection ------------------------------------------------------
 VOWELS: frozenset[str] = frozenset("aeiouy")
 
-# Common chat tokens an aggressive gibberish check might otherwise flag.
 GIBBERISH_ALLOWLIST: frozenset[str] = frozenset(
     {
         "lol", "lmao", "lmfao", "rofl", "brb", "idk", "idc", "omg", "omw",
@@ -101,9 +179,6 @@ GIBBERISH_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# A compact set of common English bigrams. A real word is mostly made of these;
-# keyboard mash ("ytjkacvzw") is mostly not. Used to score letter-sequence
-# plausibility.
 COMMON_BIGRAMS: frozenset[str] = frozenset(
     {
         "th", "he", "in", "er", "an", "re", "on", "at", "en", "nd", "ti", "es",

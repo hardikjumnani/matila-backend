@@ -12,7 +12,7 @@ Deterministic only — no AI. Bump ``RULESET_VERSION`` whenever any list changes
 
 from __future__ import annotations
 
-RULESET_VERSION = "2026.10.12-v2.2"
+RULESET_VERSION = "2026.10.26-v2.3"
 
 # --- Platforms / contact nouns (language-independent brand + contact words) --
 PLATFORM_WORDS: list[str] = [

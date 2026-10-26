@@ -22,6 +22,7 @@ from .enums import (
     ProfanityTier,
     SuspicionReviewStatus,
     SuspicionSignal,
+    SuspicionTier,
     VeilMode,
     ViolationSource,
 )
@@ -153,9 +154,9 @@ class SuspicionEvent(UUIDModel):
         related_name="suspicion_events",
     )
 
-    signals = models.JSONField(default=list, blank=True)  # [{signal, weight, span}]
+    signals = models.JSONField(default=list, blank=True)  # [{signal, weight, span, class}]
     top_signal = models.CharField(
-        max_length=20, choices=SuspicionSignal.choices, blank=True, default=""
+        max_length=32, choices=SuspicionSignal.choices, blank=True, default=""
     )
     score = models.PositiveIntegerField(default=0)
     rule_version = models.CharField(max_length=40, default="")
@@ -187,7 +188,17 @@ class UserSuspicionProfile(TimeStampedUUIDModel):
         on_delete=models.CASCADE,
         related_name="suspicion_profile",
     )
-    score = models.PositiveIntegerField(default=0)
+    score = models.PositiveIntegerField(default=0)  # lifetime cumulative (all classes)
+    # Decayed, ambient-EXCLUDED risk score. Drives the review tier and the offenders
+    # ranking so normal romanized-Hindi / non-Latin / gibberish chat never ranks a
+    # legitimate user. Time-decayed (half-life) on each update.
+    priority_score = models.PositiveIntegerField(default=0)
+    tier = models.CharField(
+        max_length=10,
+        choices=SuspicionTier.choices,
+        default=SuspicionTier.CLEAN,
+        db_index=True,
+    )
     event_count = models.PositiveIntegerField(default=0)
     last_event_at = models.DateTimeField(null=True, blank=True)
 

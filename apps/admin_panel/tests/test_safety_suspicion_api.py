@@ -41,7 +41,7 @@ class AdminSuspicionApiTests(TestCase):
             raw_message="ping me on insta",
         )
         self.profile = UserSuspicionProfile.objects.create(
-            user=self.target, score=3, event_count=1
+            user=self.target, score=3, priority_score=3, tier="WATCH", event_count=1
         )
 
     def test_suspicion_events_feed(self):
@@ -61,7 +61,27 @@ class AdminSuspicionApiTests(TestCase):
         resp = self.client.get("/api/v1/admin/safety/suspicion-offenders")
         self.assertEqual(resp.status_code, 200)
         rows = resp.json()["data"]
-        self.assertTrue(any(r["user_id"] == str(self.target.id) for r in rows))
+        row = next(r for r in rows if r["user_id"] == str(self.target.id))
+        self.assertEqual(row["tier"], "WATCH")
+        self.assertEqual(row["priority_score"], 3)
+
+    def test_reset_clears_score_and_audits(self):
+        resp = self.client.post(
+            f"/api/v1/admin/safety/users/{self.target.id}/suspicion/reset",
+            {"notes": "false accumulation"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.score, 0)
+        self.assertEqual(self.profile.priority_score, 0)
+        self.assertEqual(self.profile.tier, "CLEAN")
+        self.assertEqual(self.profile.review_status, SuspicionReviewStatus.CLEARED.value)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="safety.suspicion_score_reset", entity_id=str(self.target.id)
+            ).exists()
+        )
 
     def test_review_sets_status_and_audits(self):
         resp = self.client.post(

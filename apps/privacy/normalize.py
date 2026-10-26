@@ -27,7 +27,14 @@ import unicodedata
 
 from apps.privacy import ruleset
 
-_ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍⁠﻿­"), None)
+# Invisible / format characters used to break up needles: zero-width spaces,
+# joiners, BOM, soft hyphen, the LRM/RLM marks and the bidi/RTL overrides, plus a
+# few blank "letters" (braille blank, Hangul fillers, combining grapheme joiner)
+# that render as nothing. All are non-printing or blank, so stripping them from
+# the MATCH views only is zero false-positive (the original message is untouched).
+_EXTRA_INVISIBLES = frozenset(
+    "⠀͏ᅟᅠㅤ឴឵"
+)
 _DEVANAGARI = str.maketrans("०१२३४५६७८९", "0123456789")
 _BASE_RE = re.compile(r"0[xob][0-9a-f]+", re.IGNORECASE)
 _WS_RE = re.compile(r"\s+")
@@ -43,6 +50,17 @@ _PARTICLES = ("the", "my", "on", "your", "ur")
 _DEGLUE_RE = re.compile(
     r"\b(" + "|".join(_PARTICLES) + r")(?=[a-z]{3,})"
 )
+
+
+def strip_invisibles(text: str) -> str:
+    """Drop every Unicode format char (category Cf: zero-width spaces/joiners,
+    BOM, soft hyphen, LRM/RLM and the bidi overrides U+202A..U+202E / U+2066..U+2069)
+    plus a few blank letters used as separators. Match-only, so it cannot affect a
+    legitimate message; it only denies these characters as a way to split a leak."""
+    return "".join(
+        ch for ch in (text or "")
+        if ch not in _EXTRA_INVISIBLES and unicodedata.category(ch) != "Cf"
+    )
 
 
 def deglue_particles(text: str) -> str:
@@ -78,7 +96,7 @@ def strip_accents(text: str) -> str:
 
 def fold_base(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "")
-    t = t.translate(_ZERO_WIDTH)
+    t = strip_invisibles(t)
     t = t.translate(ruleset.CONFUSABLES_TABLE)
     t = t.lower()
     t = strip_accents(t)  # café -> cafe, so names/keywords match the de-accented form
@@ -97,7 +115,7 @@ def collapse_all(text: str) -> str:
 
 def prefold_numeric(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "")
-    t = t.translate(_ZERO_WIDTH)
+    t = strip_invisibles(t)
     t = t.translate(_DEVANAGARI)
     t = t.lower()
     return _decode_bases(t)

@@ -21,6 +21,9 @@ _POSITIVE_INT_KEYS = {
     AppConfigKey.COIN_COST_SAFE_REVEAL_MALE,
     AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE,
     AppConfigKey.COIN_COST_EXTEND,
+    AppConfigKey.SUSPICION_MIN_RECORD_WEIGHT,
+    AppConfigKey.SUSPICION_ATTENTION_SCORE,
+    AppConfigKey.SUSPICION_DECAY_HALF_LIFE_DAYS,
 }
 
 # The fixed set of coin-pack SKUs (each maps to a Google Play managed product).
@@ -91,6 +94,29 @@ def _validate_gesture_pool(value) -> None:
         raise ConfigValidationError("gesture_pool has duplicate codes.")
 
 
+def _validate_signal_weights(value) -> None:
+    if not isinstance(value, dict) or not value:
+        raise ConfigValidationError("suspicion_signal_weights must be a non-empty object.")
+    for sig, weight in value.items():
+        if not isinstance(sig, str) or not sig:
+            raise ConfigValidationError("suspicion_signal_weights has an empty signal key.")
+        if not _is_positive_int(weight):
+            raise ConfigValidationError(f"{sig}: weight must be a positive integer.")
+
+
+def _validate_tier_thresholds(value) -> None:
+    if not isinstance(value, dict):
+        raise ConfigValidationError("suspicion_tier_thresholds must be an object.")
+    required = ("WATCH", "ELEVATED", "HIGH")
+    for key in required:
+        if not _is_positive_int(value.get(key)):
+            raise ConfigValidationError(f"suspicion_tier_thresholds.{key} must be a positive integer.")
+    if not (value["WATCH"] < value["ELEVATED"] < value["HIGH"]):
+        raise ConfigValidationError(
+            "suspicion_tier_thresholds must satisfy WATCH < ELEVATED < HIGH."
+        )
+
+
 def _validate_reaction_emojis(value) -> None:
     if not isinstance(value, list) or not value:
         raise ConfigValidationError("reaction_emojis must be a non-empty list.")
@@ -119,3 +145,7 @@ def validate_app_config(key: str, value) -> None:
         _validate_gesture_pool(value)
     elif key == AppConfigKey.REACTION_EMOJIS:
         _validate_reaction_emojis(value)
+    elif key == AppConfigKey.SUSPICION_SIGNAL_WEIGHTS:
+        _validate_signal_weights(value)
+    elif key == AppConfigKey.SUSPICION_TIER_THRESHOLDS:
+        _validate_tier_thresholds(value)

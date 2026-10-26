@@ -58,6 +58,13 @@ BENIGN: list[tuple[str, str, str]] = [
     ("kaise ho bhai sab accha hai", "", ""),              # romanized hindi (Latin)
     ("café José is my friend", "", ""),                   # accented Latin -> allowed
     ("great work today 🔥🔥 so good", "", ""),             # emoji
+    # MEETING precision: INVITE + TIME with NO place must NOT block (v2.3 fix).
+    ("lets meet tomorrow sometime", "", ""),              # invite + time, no place
+    ("kal milte hain", "", ""),                           # hindi invite + time
+    ("do dil milte hain shaam ko", "", ""),               # poetic hindi invite + time
+    # Leet-to-digit pass must NOT fold pure-letter prose into a phone (v2.3):
+    ("goose goose goose everywhere today", "", ""),       # g,o,o,s,e -> digits, no digit token
+    ("this bag is too big to lose", "", ""),              # leet-ish letters, no phone
 ]
 
 # (text, prior_text, sender_name)
@@ -96,6 +103,14 @@ MALICIOUS: list[tuple[str, str, str]] = [
     ("call me h i m a n s h u", "", "Himanshu Chauhan"),  # separator glue
     ("h1man5hu this side", "", "Himanshu Chauhan"),       # leetspeak
     ("chauhanhereactually", "", "Himanshu Chauhan"),      # second token glued
+    # Reversed self-name (sender "Himanshu Chauhan") -> SELF_NAME (v2.3).
+    ("my name is uhsnamih btw", "", "Himanshu Chauhan"),  # "himanshu" reversed
+    # Reversed phone digits (forward 0123456789 is not a mobile; reverse is) (v2.3).
+    ("read it backwards 0123456789", "", ""),
+    # Leet-to-digit mobile in a mixed token "9o765432lo" -> 9876543210 (v2.3).
+    ("my num is 9o765432lo", "", ""),
+    # NATO digit words "niner"/"fower" (v2.3).
+    ("niner eight seven six five fower three two one zero", "", ""),
     # Non-English script -> hard block (English-only policy).
     ("नमस्ते", "", ""),                    # devanagari
     ("హాయ్ ఎలా ఉన్నావు", "", ""),            # telugu

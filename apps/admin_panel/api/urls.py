@@ -37,6 +37,7 @@ from apps.admin_panel.api.safety_views import (
     AdminResetStrikesView,
     AdminSafetyStatsView,
     AdminSuspicionEventListView,
+    AdminSuspicionResetView,
     AdminSuspicionReviewView,
     AdminUserSafetyDetailView,
 )
@@ -198,6 +199,11 @@ urlpatterns = [
         "admin/safety/users/<uuid:user_id>/suspicion/review",
         AdminSuspicionReviewView.as_view(),
         name="safety-suspicion-review",
+    ),
+    path(
+        "admin/safety/users/<uuid:user_id>/suspicion/reset",
+        AdminSuspicionResetView.as_view(),
+        name="safety-suspicion-reset",
     ),
     path(
         "admin/chats/<uuid:chat_id>/messages",

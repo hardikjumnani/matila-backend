@@ -27,10 +27,15 @@ PSP handles and URL TLDs are language-independent and live in ``ruleset.py``.
 from __future__ import annotations
 
 # Shared, language-independent number words (unambiguous ones only).
+# NATO/aviation digit words ("niner"=9, "fower"=4) are included because they are
+# not ordinary English words, so they cannot false-positive in prose. Ambiguous
+# NATO forms that ARE English words ("tree"=3, "ate"=8, "won"=1, "fife"=5) are
+# deliberately omitted here and handled by the suspicion engine instead.
 _EN_DIGITS = {
     "zero": "0", "oh": "0", "nought": "0",
     "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
     "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "niner": "9", "fower": "4",
 }
 
 LANGUAGES: dict[str, dict] = {

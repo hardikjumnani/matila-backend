@@ -15,7 +15,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from apps.common.results import ServiceResult
-from apps.privacy.enums import SuspicionReviewStatus
+from apps.privacy.enums import SuspicionReviewStatus, SuspicionTier
 from apps.privacy.models import (
     LeakEvent,
     LeakStrike,
@@ -142,7 +142,11 @@ class TrustSafetyService:
         )
         if review_status:
             qs = qs.filter(review_status=review_status.upper())
-        profiles = list(qs.order_by("-score", "-last_event_at")[offset : offset + limit])
+        # Rank by the decayed, ambient-excluded PRIORITY score (then tier), so normal
+        # romanized-Hindi / non-Latin / gibberish chat never ranks a legitimate user.
+        profiles = list(
+            qs.order_by("-priority_score", "-last_event_at")[offset : offset + limit]
+        )
         return [
             {
                 "user_id": str(p.user_id),
@@ -150,12 +154,31 @@ class TrustSafetyService:
                 "user_name": p.user.full_name,
                 "account_status": p.user.account_status,
                 "score": p.score,
+                "priority_score": p.priority_score,
+                "tier": p.tier,
                 "event_count": p.event_count,
                 "last_event_at": p.last_event_at,
                 "review_status": p.review_status,
             }
             for p in profiles
         ]
+
+    @staticmethod
+    def _suspicion_class_counts(suspicions) -> dict[str, int]:
+        """Count a user's suspicion events by signal CLASS (ambient / structural /
+        pii / behavioral), so an admin sees whether the accumulation is just ambient
+        noise or real PII tells. Derived from the stored per-signal class."""
+        from apps.privacy.suspicion_data import SIGNAL_CLASS
+
+        counts: dict[str, int] = {}
+        for ev in suspicions.values_list("signals", flat=True):
+            seen: set[str] = set()
+            for s in ev or []:
+                cls = s.get("class") or SIGNAL_CLASS.get(s.get("signal", ""), "pii")
+                if cls not in seen:  # one count per class per event
+                    counts[cls] = counts.get(cls, 0) + 1
+                    seen.add(cls)
+        return counts
 
     # -- Per-user safety profile --------------------------------------------
 
@@ -183,8 +206,11 @@ class TrustSafetyService:
             },
             "suspicion": {
                 "score": profile.score if profile else 0,
+                "priority_score": profile.priority_score if profile else 0,
+                "tier": profile.tier if profile else "CLEAN",
                 "event_count": profile.event_count if profile else 0,
                 "last_event_at": profile.last_event_at if profile else None,
+                "by_class": self._suspicion_class_counts(suspicions),
                 "review_status": (
                     profile.review_status
                     if profile
@@ -259,6 +285,43 @@ class TrustSafetyService:
         )
         return ServiceResult.ok(
             {"user_id": str(user.id), "strike_count": 0, "previous_count": previous}
+        )
+
+    def reset_suspicion_score(
+        self, *, user, admin_id: str, notes: str = ""
+    ) -> ServiceResult[dict]:
+        """Clear a user's accumulated suspicion (score + priority + tier) and mark it
+        CLEARED. Lets an admin wipe a false accumulation in one click. Audited.
+        Still advisory only: this does not change the account."""
+        from apps.audit.enums import ActorType
+        from apps.audit.services.audit_service import AuditService
+
+        profile, _ = UserSuspicionProfile.objects.get_or_create(user=user)
+        previous = profile.score
+        profile.score = 0
+        profile.priority_score = 0
+        profile.tier = SuspicionTier.CLEAN.value
+        profile.review_status = SuspicionReviewStatus.CLEARED.value
+        profile.reviewed_by = admin_id
+        profile.reviewed_at = timezone.now()
+        if notes:
+            profile.notes = notes
+        profile.save(
+            update_fields=[
+                "score", "priority_score", "tier", "review_status",
+                "reviewed_by", "reviewed_at", "notes", "updated_at",
+            ]
+        )
+        AuditService().log(
+            actor_type=ActorType.ADMIN,
+            actor_id=admin_id,
+            action="safety.suspicion_score_reset",
+            entity_type="user",
+            entity_id=str(user.id),
+            metadata={"previous_score": previous, "notes": notes},
+        )
+        return ServiceResult.ok(
+            {"user_id": str(user.id), "score": 0, "previous_score": previous}
         )
 
     def review_suspicion(

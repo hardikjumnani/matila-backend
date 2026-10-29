@@ -83,6 +83,7 @@ _ASK_PLATFORM_DIST = 25
 _STEER_PLATFORM_DIST = 20
 _SELF_NAME_MIN_TOKEN = 3
 _SELF_NAME_GLUE_MIN = 6    # only tokens this long get the unbounded (glued) match
+_SPELL_RUN_MIN = 3         # a run of >= this many single-char tokens = spelled-out
 _PHONE_MIN_DIGITS = 7      # libphonenumber only runs past this many digits
 _GLUE_MIN_TOKEN = 6        # collapsed view only runs if a token is this long
 
@@ -496,6 +497,8 @@ class LeakGuard:
             t for t in re.split(r"[^a-z0-9]+", (ctx.sender_name or "").lower())
             if len(t) >= _SELF_NAME_MIN_TOKEN
         }
+        if not tokens:
+            return None
         # Tier 1 - boundary match on the exact fold view (unchanged behaviour).
         for tok in tokens:
             if re.search(r"(?<![a-z])" + re.escape(tok) + r"(?![a-z])", ctx.fold_base):
@@ -505,29 +508,78 @@ class LeakGuard:
         # "h1man5hu"). Only DISTINCTIVE (long) tokens get the unbounded substring
         # test, matched against the separator-free collapsed view (and its leet
         # fold), so short tokens can never fire inside ordinary words (zero-FP).
+        # TWO collapsed views are used so a DOUBLED letter cannot be evaded by
+        # spelling the name out: the squeezed ``collapse_all`` catches stretch
+        # ("himaaanshu"); the raw ``collapse_base`` keeps doubles so a spelled
+        # "u j j w a l" -> "ujjwal" still matches the needle (whose squeezed form
+        # would be "ujwal"). Match if the name appears in EITHER view.
         collapsed = normalize.collapse_all(ctx.raw)
-        collapsed_leet = collapsed.translate(_LEET)
+        collapsed_raw = normalize.collapse_base(ctx.raw)
+        haystacks = (
+            collapsed, collapsed.translate(_LEET),
+            collapsed_raw, collapsed_raw.translate(_LEET),
+        )
         for tok in tokens:
             if len(tok) < _SELF_NAME_GLUE_MIN:
                 continue
-            needle = normalize.collapse_all(tok)  # same space as the haystack
-            if needle and (needle in collapsed or needle in collapsed_leet):
-                return Hit(
-                    LeakCategory.SELF_NAME.value, _HIGH, "self_name_glued", tok
-                )
-        # Tier 3 - reversed name ("kidrah" for "hardik", "uhsnamih" for "himanshu").
-        # Only long (>= glue floor) tokens get this, so a short reversed string can
-        # never collide with ordinary words (zero-FP), and self-name-only so a
-        # partner is never blocked.
+            for needle in (normalize.collapse_all(tok), normalize.collapse_base(tok)):
+                if needle and any(needle in h for h in haystacks):
+                    return Hit(
+                        LeakCategory.SELF_NAME.value, _HIGH, "self_name_glued", tok
+                    )
+        # Tier 3 - reversed name ("kidrah" for "hardik", "uhsnamih" for "himanshu",
+        # "lawjju" for "ujjwal"). Only long (>= glue floor) tokens get this, so a
+        # short reversed string can never collide with ordinary words (zero-FP),
+        # and self-name-only so a partner is never blocked. Same squeezed-OR-raw
+        # pair as Tier 2 so a reversed doubled name is handled symmetrically.
         for tok in tokens:
             if len(tok) < _SELF_NAME_GLUE_MIN:
                 continue
-            rev = normalize.collapse_all(tok)[::-1]
-            if rev and (rev in collapsed or rev in collapsed_leet):
-                return Hit(
-                    LeakCategory.SELF_NAME.value, _HIGH, "self_name_reversed", tok
-                )
+            for rev in (
+                normalize.collapse_all(tok)[::-1],
+                normalize.collapse_base(tok)[::-1],
+            ):
+                if rev and any(rev in h for h in haystacks):
+                    return Hit(
+                        LeakCategory.SELF_NAME.value, _HIGH, "self_name_reversed", tok
+                    )
+        # Tier 4 - spelled-out name: a contiguous run of single-character tokens
+        # that concatenates to contain the sender's name ("my name is u j j w a l",
+        # "a r y a"). A run of single letters is itself abnormal in prose, so the
+        # structure (not token length) is the false-positive gate. This is the ONLY
+        # tier that may match a SHORT name token (< glue floor), because the spelled
+        # structure guarantees intent; it stays self-name-only, so a partner is
+        # never blocked. Also runs on the window-concatenated text via _detect.
+        for cand in LeakGuard._spelled_runs(ctx.fold_base):
+            cand_leet = cand.translate(_LEET)
+            for tok in tokens:
+                needle = normalize.collapse_base(tok)
+                if needle and len(cand) >= len(needle) and (
+                    needle in cand or needle in cand_leet
+                ):
+                    return Hit(
+                        LeakCategory.SELF_NAME.value, _HIGH, "self_name_spelled", tok
+                    )
         return None
+
+    @staticmethod
+    def _spelled_runs(fold_base: str) -> list[str]:
+        """Maximal runs of >= ``_SPELL_RUN_MIN`` single-character alnum tokens,
+        each concatenated with doubles preserved. A multi-letter word breaks a run,
+        so a name is only reconstructed from letters actually spelled one at a
+        time (not from stray single letters scattered through ordinary prose)."""
+        runs: list[str] = []
+        cur: list[str] = []
+        for t in re.split(r"[^a-z0-9]+", fold_base):
+            if len(t) == 1:
+                cur.append(t)
+                continue
+            if len(cur) >= _SPELL_RUN_MIN:
+                runs.append("".join(cur))
+            cur = []
+        if len(cur) >= _SPELL_RUN_MIN:
+            runs.append("".join(cur))
+        return runs
 
     @staticmethod
     def _foreign_script(raw: str) -> Hit | None:

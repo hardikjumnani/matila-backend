@@ -113,6 +113,18 @@ def collapse_all(text: str) -> str:
     return _NONALNUM_RE.sub("", fold_primary(text))
 
 
+def collapse_base(text: str) -> str:
+    """Separator-free view WITHOUT letter-squeezing (doubled letters preserved).
+
+    Like :func:`collapse_all` but built on ``fold_base`` (no de-glue, no
+    repeated-letter squeeze), so a doubled letter spelled with separators
+    ("u j j w a l") survives as "ujjwal" instead of being squeezed to "ujwal".
+    Used by self-name matching so a name with a doubled letter cannot be evaded
+    by spelling it out: the squeezed ``collapse_all`` view folds the needle's
+    double but not the separator-spelled haystack's, which this view fixes."""
+    return _NONALNUM_RE.sub("", fold_base(text))
+
+
 def prefold_numeric(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "")
     t = strip_invisibles(t)

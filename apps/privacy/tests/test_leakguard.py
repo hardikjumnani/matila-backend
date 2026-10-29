@@ -171,6 +171,16 @@ class CrossMessageTextTests(SimpleTestCase):
         v = self.g.scan("instagram feed", prior_text="i love my")
         self.assertFalse(v.blocked)
 
+    def test_self_name_spelled_across_messages(self):
+        # A doubled-letter name dripped one letter per message: each letter alone
+        # is harmless, but the window reassembles it and the COMPLETING message is
+        # blocked (the earlier-letters residual is out of scope by design).
+        name = "Ujjwal Kumar Rai"
+        self.assertFalse(self.g.scan("u", sender_name=name).blocked)
+        v = self.g.scan("l", prior_text="u j j w a", sender_name=name)
+        self.assertTrue(v.blocked)
+        self.assertEqual(v.top_category, LeakCategory.SELF_NAME.value)
+
 
 class MultilingualAndEvasionTests(SimpleTestCase):
     """New v2 capabilities: multilingual keyword dictionaries, cross-script
@@ -264,6 +274,50 @@ class MultilingualAndEvasionTests(SimpleTestCase):
         # still caught by the self-name check.
         self._blocked("i am jösé", LeakCategory.SELF_NAME.value,
                       sender_name="Jose Garcia")
+
+    def test_self_name_doubled_letter_spelled(self):
+        # Fix A: a name with a DOUBLED letter spelled with separators used to
+        # evade the glued tier (needle "ujjwal" squeezed to "ujwal", haystack kept
+        # "ujjwal"). The un-squeezed collapsed view now matches it, for every
+        # separator style and in one message.
+        name = "Ujjwal Kumar Rai"
+        for text in (
+            "my name is u j j w a l",         # spaces
+            "my name is \n\nu\nj\nj\nw\na\nl",  # newlines (the reported case)
+            "u.j.j.w.a.l",                     # dots
+            "u-j-j-w-a-l",                     # dashes
+            "iamujjwal for real",              # glued, doubled, one word
+        ):
+            self._blocked(text, LeakCategory.SELF_NAME.value, sender_name=name)
+
+    def test_self_name_short_spelled(self):
+        # Fix B: a SHORT name (< glue floor) spelled one letter at a time. The run
+        # of single letters is the FP gate, so the length floor is not needed here.
+        self._blocked("a r y a", LeakCategory.SELF_NAME.value, sender_name="Arya")
+        self._blocked("my name is r a v i", LeakCategory.SELF_NAME.value,
+                      sender_name="Ravi Shah")
+
+    def test_self_name_reversed_doubled_spelled(self):
+        # Tier 3 parity: reversed doubled name spelled out ("lawjju" for "ujjwal").
+        self._blocked("l a w j j u", LeakCategory.SELF_NAME.value,
+                      sender_name="Ujjwal Kumar Rai")
+
+    def test_spelled_run_other_words_not_blocked(self):
+        # Spelling out letters that form OTHER words (not the sender's name) must
+        # never block: interjections / initialisms are common and harmless.
+        name = "Ujjwal Kumar Rai"
+        for text in ("b t w", "o m g", "g g", "a b c d", "l o l that was funny"):
+            self.assertFalse(
+                self.g.scan(text, sender_name=name).blocked,
+                f"should allow {text!r}",
+            )
+
+    def test_self_name_spelled_partner_not_blocked(self):
+        # Self-name is sender-only: spelling a DIFFERENT person's name is allowed
+        # (it is not the sender deanonymising themselves).
+        self.assertFalse(
+            self.g.scan("u j j w a l", sender_name="Hardik Jumnani").blocked
+        )
 
 
 class EvasionV21Tests(SimpleTestCase):

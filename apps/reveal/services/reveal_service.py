@@ -389,6 +389,10 @@ class RevealService:
         fc = round_.final_call
         if fc == FinalCall.REVEAL:
             self._chats.mark_revealed(str(chat.id))
+            # One-time first-reveal discount: both sides have now completed a full
+            # reveal, so their NEXT reveal is full price. Idempotent, never unset.
+            # See docs/FIRST_REVEAL_DISCOUNT_PLAN.md.
+            self._mark_revealers_completed(chat)
             round_.phase = DecisionRoundPhase.RESOLVED
             round_.status_changed_at = timezone.now()
             round_.save(update_fields=["phase", "status_changed_at"])
@@ -544,10 +548,30 @@ class RevealService:
         FinalCall.SAFE_REVEAL: "SAFE_REVEAL",
     }
 
+    def is_first_reveal(self, user) -> bool:
+        """Whether this would be the user's first-ever full reveal (eligibility for
+        the one-time discount). The config flag decides whether a discount actually
+        applies; this is pure per-user state. See FIRST_REVEAL_DISCOUNT_PLAN.md."""
+        return not getattr(user, "has_completed_reveal", False)
+
+    def _mark_revealers_completed(self, chat) -> None:
+        """Flag every participant of a just-revealed chat as having completed a
+        reveal (so their first-reveal discount is consumed). Idempotent."""
+        from apps.users.models import User
+
+        uids = [p.user_id for p in chat.participants.all()]
+        User.objects.filter(id__in=uids, has_completed_reveal=False).update(
+            has_completed_reveal=True
+        )
+
     def _credit_unmatched_payments(self, round_: DecisionRound) -> None:
         """Refund coins for any side that paid but whose action won't execute. Each
         side is refunded the coin cost of its own action (per gender for safe
-        reveal), regardless of whether it paid by coin or cash."""
+        reveal), regardless of whether it paid by coin or cash.
+
+        For REVEAL the first-reveal discount is honored: a refund only happens when
+        the reveal did NOT execute, so ``has_completed_reveal`` is still unset for a
+        first-timer, and the recomputed cost equals what was charged (8, not 10)."""
         purpose = self._FINAL_TO_PURPOSE.get(round_.final_call)
         if purpose is None:
             return
@@ -555,7 +579,8 @@ class RevealService:
             if pd.paid_at is None:
                 continue
             amount = self._config.get_coin_cost(
-                purpose, getattr(pd.user, "gender", None)
+                purpose, getattr(pd.user, "gender", None),
+                first_reveal=(str(purpose) == "REVEAL" and self.is_first_reveal(pd.user)),
             )
             self._credits.credit(
                 user=pd.user,
@@ -589,11 +614,20 @@ class RevealService:
                 else:
                     other = d
         girl = self._female_participant(chat)
+        regular_reveal = self._config.get_coin_cost("REVEAL")
+        my_reveal_cost = self._config.get_coin_cost(
+            "REVEAL", first_reveal=self.is_first_reveal(user)
+        )
         return {
             "chat_id": str(chat_id),
             "chat_status": chat.status,
             "eligible": self.is_eligible(chat),
             "available_choices": self.available_choices(chat, user),
+            # User-aware reveal price: the discounted first-reveal cost when it
+            # applies, else the regular cost. ``first_reveal`` is true only when a
+            # discount was actually applied (badge). See FIRST_REVEAL_DISCOUNT_PLAN.md.
+            "coin_cost_reveal": my_reveal_cost,
+            "first_reveal": my_reveal_cost < regular_reveal,
             "phase": round_.phase if round_ else None,
             "final_call": (round_.final_call or None) if round_ else None,
             "my_choice": (mine.choice or None) if mine else None,

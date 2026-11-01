@@ -305,7 +305,11 @@ class PaymentService:
         if ctx.failed:
             return ServiceResult.fail(ctx.error_code, ctx.error_message)
 
-        cost = self._config.get_coin_cost(purpose, getattr(user, "gender", None))
+        # First full reveal gets the one-time discount (config-gated). REVEAL only.
+        first = str(purpose) == "REVEAL" and self._reveal.is_first_reveal(user)
+        cost = self._config.get_coin_cost(
+            purpose, getattr(user, "gender", None), first_reveal=first
+        )
         round_id = self._reveal.active_round_id(chat)
         spent = self._credits.spend(
             user=user,

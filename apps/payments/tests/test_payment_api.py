@@ -134,6 +134,10 @@ class PaymentApiTests(TestCase):
             user=self.boy, amount=10,
             reason="ADMIN_ADJUST", idempotency_key="seed",
         )
+        # Regular (non-first) reveal: the first-reveal discount is tested in
+        # FirstRevealDiscountTests.
+        self.boy.has_completed_reveal = True
+        self.boy.save(update_fields=["has_completed_reveal"])
         self.reveal.submit_decision(
             chat_id=str(self.chat.id), user=self.boy, choice=DecisionChoice.REVEAL
         )

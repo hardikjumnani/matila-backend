@@ -47,6 +47,10 @@ APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
         APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_REVEAL],
         "Coin cost of a reveal side.",
     ),
+    AppConfigKey.COIN_COST_REVEAL_FIRST: (
+        APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_REVEAL_FIRST],
+        "Coin cost of a user's first-ever reveal side (one-time discount).",
+    ),
     AppConfigKey.COIN_COST_SAFE_REVEAL_MALE: (
         APP_CONFIG_DEFAULTS[AppConfigKey.COIN_COST_SAFE_REVEAL_MALE],
         "Coin cost of the boy's safe-reveal side.",
@@ -115,6 +119,10 @@ FEATURE_FLAG_SEED: dict[str, tuple[bool, str]] = {
     FeatureFlagKey.SUSPICION_ENABLED: (
         False,
         "Second-hand Veil suspicion engine. OFF until tuned in shadow.",
+    ),
+    FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED: (
+        True,
+        "One-time discounted price for a user's first reveal.",
     ),
 }
 

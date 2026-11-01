@@ -156,6 +156,10 @@ class PaymentServiceTests(TestCase):
         self.credits.credit(
             user=self.boy, amount=10, reason="ADMIN_ADJUST", idempotency_key="seed",
         )
+        # Regular (non-first) reveal here; the first-reveal discount path is
+        # covered in FirstRevealDiscountTests.
+        self.boy.has_completed_reveal = True
+        self.boy.save(update_fields=["has_completed_reveal"])
         self._reach_reveal_payment()
         result = self.service.pay_with_coin(
             user=self.boy, chat_id=str(self.chat.id), purpose=PaymentPurpose.REVEAL
@@ -190,3 +194,113 @@ class PaymentServiceTests(TestCase):
         bal = self.credits.get_balances(self.boy)
         self.assertEqual(bal["coins"], 0)
         self.assertTrue(bal["has_held_coins"])  # stays true after returning to 0
+
+
+@override_settings(PAYMENTS_DEV_BYPASS=True)
+class FirstRevealDiscountTests(TestCase):
+    """One-time first-reveal discount: a user's first full reveal costs 8 coins,
+    every later reveal costs the regular 10. See FIRST_REVEAL_DISCOUNT_PLAN.md."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        notif = mock.MagicMock()
+        self.chats = ChatService(notification_service=notif)
+        self.reveal = RevealService(chat_service=self.chats, notification_service=notif)
+        self.credits = CreditService()
+        self.service = PaymentService(
+            chat_service=self.chats, reveal_service=self.reveal,
+            credit_service=self.credits, notification_service=notif,
+        )
+        self.boy = _user(Gender.MALE)
+        self.girl = _user(Gender.FEMALE)
+        for u in (self.boy, self.girl):
+            self.credits.credit(
+                user=u, amount=100, reason="ADMIN_ADJUST", idempotency_key=f"seed-{u.id}",
+            )
+
+    def _fresh_chat(self, a, b):
+        chat = self.chats.create_chat(a, b).data
+        Chat.objects.filter(id=chat.id).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
+        return chat
+
+    def _reach_payment(self, chat, a, b):
+        self.reveal.submit_decision(
+            chat_id=str(chat.id), user=a, choice=DecisionChoice.REVEAL
+        )
+        self.reveal.submit_decision(
+            chat_id=str(chat.id), user=b, choice=DecisionChoice.REVEAL
+        )
+
+    def _coins(self, u):
+        return self.credits.get_balances(u)["coins"]
+
+    def test_first_reveal_is_8_then_regular_10(self) -> None:
+        # First reveal: boy charged 8 (discount).
+        chat1 = self._fresh_chat(self.boy, self.girl)
+        self._reach_payment(chat1, self.boy, self.girl)
+        before = self._coins(self.boy)
+        self.service.pay_with_coin(
+            user=self.boy, chat_id=str(chat1.id), purpose=PaymentPurpose.REVEAL
+        )
+        self.assertEqual(before - self._coins(self.boy), 8)
+        # Complete the reveal (girl pays) -> both flagged as having revealed.
+        self.service.pay_with_coin(
+            user=self.girl, chat_id=str(chat1.id), purpose=PaymentPurpose.REVEAL
+        )
+        self.boy.refresh_from_db()
+        self.assertTrue(self.boy.has_completed_reveal)
+
+        # Second reveal (new partner): boy now charged the regular 10.
+        girl2 = _user(Gender.FEMALE)
+        self.credits.credit(
+            user=girl2, amount=100, reason="ADMIN_ADJUST", idempotency_key="seed-g2",
+        )
+        self.boy.refresh_from_db()
+        chat2 = self._fresh_chat(self.boy, girl2)
+        self._reach_payment(chat2, self.boy, girl2)
+        before2 = self._coins(self.boy)
+        self.service.pay_with_coin(
+            user=self.boy, chat_id=str(chat2.id), purpose=PaymentPurpose.REVEAL
+        )
+        self.assertEqual(before2 - self._coins(self.boy), 10)
+
+    def test_discount_flag_off_charges_regular(self) -> None:
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED, value=False
+        )
+        cache.clear()
+        chat = self._fresh_chat(self.boy, self.girl)
+        self._reach_payment(chat, self.boy, self.girl)
+        before = self._coins(self.boy)
+        self.service.pay_with_coin(
+            user=self.boy, chat_id=str(chat.id), purpose=PaymentPurpose.REVEAL
+        )
+        self.assertEqual(before - self._coins(self.boy), 10)  # no discount
+
+    def test_refund_matches_first_reveal_charge_and_keeps_discount(self) -> None:
+        from apps.reveal.models import DecisionRound
+
+        chat = self._fresh_chat(self.boy, self.girl)
+        self._reach_payment(chat, self.boy, self.girl)
+        self.service.pay_with_coin(
+            user=self.boy, chat_id=str(chat.id), purpose=PaymentPurpose.REVEAL
+        )
+        before = self._coins(self.boy)  # boy charged 8, girl not yet paid
+        round_ = DecisionRound.objects.get(id=self.reveal.active_round_id(chat))
+        self.reveal._credit_unmatched_payments(round_)
+        self.assertEqual(self._coins(self.boy) - before, 8)  # refunded exactly 8
+        self.boy.refresh_from_db()
+        self.assertFalse(self.boy.has_completed_reveal)  # discount preserved
+
+    def test_state_payload_exposes_user_aware_price(self) -> None:
+        chat = self._fresh_chat(self.boy, self.girl)
+        st = self.reveal.get_decision_state(chat_id=str(chat.id), user=self.boy).data
+        self.assertEqual(st["coin_cost_reveal"], 8)
+        self.assertTrue(st["first_reveal"])
+        self.boy.has_completed_reveal = True
+        self.boy.save(update_fields=["has_completed_reveal"])
+        st2 = self.reveal.get_decision_state(chat_id=str(chat.id), user=self.boy).data
+        self.assertEqual(st2["coin_cost_reveal"], 10)
+        self.assertFalse(st2["first_reveal"])

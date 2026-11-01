@@ -352,6 +352,11 @@ class DecisionFlowTests(TestCase):
             user=self.girl, amount=10,
             reason="ADMIN_ADJUST", idempotency_key="seed-girl",
         )
+        # Regular (non-first) reveal for both; the first-reveal discount is
+        # covered in payments FirstRevealDiscountTests.
+        for u in (self.boy, self.girl):
+            u.has_completed_reveal = True
+            u.save(update_fields=["has_completed_reveal"])
         self._make_eligible()
         self._decide(self.boy, DecisionChoice.REVEAL)
         self._decide(self.girl, DecisionChoice.REVEAL)

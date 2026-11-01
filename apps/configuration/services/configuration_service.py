@@ -107,12 +107,26 @@ class ConfigurationService:
                 return pack
         return None
 
-    def get_coin_cost(self, purpose: str, gender: str | None = None) -> int:
+    def get_coin_cost(
+        self, purpose: str, gender: str | None = None, *, first_reveal: bool = False
+    ) -> int:
         """Coin cost of a paid action side (unified Coin). ``purpose`` is a
-        PaymentPurpose value string; ``gender`` is required for SAFE_REVEAL."""
+        PaymentPurpose value string; ``gender`` is required for SAFE_REVEAL.
+
+        ``first_reveal=True`` (only meaningful for REVEAL) applies the one-time
+        first-reveal discount when the flag is enabled. The discounted price is
+        clamped to never exceed the regular price, so a misconfigured value is
+        harmless. Callers decide eligibility (see docs/FIRST_REVEAL_DISCOUNT_PLAN.md)."""
         p = str(purpose)
         if p == "REVEAL":
-            return int(self.get_config(AppConfigKey.COIN_COST_REVEAL))
+            regular = int(self.get_config(AppConfigKey.COIN_COST_REVEAL))
+            if first_reveal and self.is_feature_enabled(
+                FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED
+            ):
+                return min(
+                    int(self.get_config(AppConfigKey.COIN_COST_REVEAL_FIRST)), regular
+                )
+            return regular
         if p == "CHAT_EXTENSION":
             return int(self.get_config(AppConfigKey.COIN_COST_EXTEND))
         if p == "SAFE_REVEAL":

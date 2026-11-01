@@ -30,6 +30,9 @@ class AppConfigKey:
     CHAT_EXTENSION_PRICE_PAISE = "chat_extension_price_paise"
     # Coin costs per action side (unified Coin).
     COIN_COST_REVEAL = "coin_cost_reveal"
+    # Discounted price for a user's VERY FIRST full reveal (one-time, per user).
+    # See docs/FIRST_REVEAL_DISCOUNT_PLAN.md.
+    COIN_COST_REVEAL_FIRST = "coin_cost_reveal_first"
     COIN_COST_SAFE_REVEAL_MALE = "coin_cost_safe_reveal_male"
     COIN_COST_SAFE_REVEAL_FEMALE = "coin_cost_safe_reveal_female"
     COIN_COST_EXTEND = "coin_cost_extend"
@@ -71,6 +74,8 @@ class FeatureFlagKey:
     MUFFLE_ENABLED = "muffle_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
+    # One-time first-reveal coin discount (coin_cost_reveal_first). ON by default.
+    FIRST_REVEAL_DISCOUNT_ENABLED = "first_reveal_discount_enabled"
     # Direct cash-per-action purchase (Google Play verify-purchase for
     # reveal/safe-reveal/extend). Seeded OFF: the app is coins-only, so a paid
     # action is funded by buying a coin pack and spending coins. Flip on only to
@@ -88,6 +93,7 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     AppConfigKey.CHAT_EXTENSION_PRICE_PAISE: 5000,  # Rs.50 extend.
     # FINAL coin costs per action side (unified Coin).
     AppConfigKey.COIN_COST_REVEAL: 10,
+    AppConfigKey.COIN_COST_REVEAL_FIRST: 8,  # one-time first-reveal discount.
     AppConfigKey.COIN_COST_SAFE_REVEAL_MALE: 8,
     AppConfigKey.COIN_COST_SAFE_REVEAL_FEMALE: 16,
     AppConfigKey.COIN_COST_EXTEND: 6,
@@ -163,6 +169,8 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     FeatureFlagKey.VEIL_ENABLED: True,
     FeatureFlagKey.MUFFLE_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
+    # One-time first-reveal coin discount. ON by default; runtime kill-switch.
+    FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED: True,
     # OFF by default: coins-only. Direct cash-per-action is retired; funding an
     # action means buying a coin pack then spending coins. See COINS_ONLY_PLAN.md.
     FeatureFlagKey.DIRECT_ACTION_PURCHASE_ENABLED: False,

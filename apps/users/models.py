@@ -105,6 +105,10 @@ class User(TimeStampedUUIDModel):
     )
     onboarding_completed_at = models.DateTimeField(null=True, blank=True)
     last_active_at = models.DateTimeField(null=True, blank=True)
+    # True once the user has completed at least one full REVEAL. Drives the
+    # one-time first-reveal coin discount (see docs/FIRST_REVEAL_DISCOUNT_PLAN.md);
+    # set on successful reveal execution, never unset.
+    has_completed_reveal = models.BooleanField(default=False)
 
     class Meta:
         db_table = "users"

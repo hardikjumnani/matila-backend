@@ -96,6 +96,20 @@ class SuspicionGuardTests(SimpleTestCase):
         signals = self._signals("qwrtzxc", sender_name="Qwrtzxc Lastname")
         self.assertNotIn("GIBBERISH", signals)
 
+    def test_meeting_soft_invite_plus_venue(self):
+        self.assertIn(
+            "MEETING_SOFT", self._signals("lets meet at the resort tomorrow")
+        )
+
+    def test_location_soft_multiple_venues_no_invite(self):
+        self.assertIn("LOCATION_SOFT", self._signals("the hostel near the station"))
+
+    def test_single_venue_no_meeting_signal(self):
+        # A lone place word (benign narrowing) must not trip a meeting/location signal.
+        signals = self._signals("the canteen food is good")
+        self.assertNotIn("LOCATION_SOFT", signals)
+        self.assertNotIn("MEETING_SOFT", signals)
+
     def test_benign_noise_budget(self):
         noisy = [(t, self.g.scan(t).score) for t in BENIGN if self.g.scan(t).score]
         self.assertEqual(noisy, [], f"benign text produced signals: {noisy}")

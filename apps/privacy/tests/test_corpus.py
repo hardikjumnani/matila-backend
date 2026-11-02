@@ -65,6 +65,16 @@ BENIGN: list[tuple[str, str, str]] = [
     # Leet-to-digit pass must NOT fold pure-letter prose into a phone (v2.3):
     ("goose goose goose everywhere today", "", ""),       # g,o,o,s,e -> digits, no digit token
     ("this bag is too big to lose", "", ""),              # leet-ish letters, no phone
+    # MEETING/LOCATION precision (v2.5): place talk without an invite-governed venue,
+    # and multi-message status clauses, must NOT block (zero-FP).
+    ("the office is on the 5th floor", "", ""),           # bare address component
+    ("the resort was really nice", "", ""),               # venue, no invite
+    ("i love goa and the beach", "", ""),                 # city + venue, no invite
+    ("the resort was nice, wanna meet tomorrow", "", ""), # invite + venue, not governed/near
+    ("the prices were 1.99, 2.99 only", "", ""),          # decimals, not geo coords
+    ("I was at the cafe earlier", "lets meet up", ""),     # window: status clause (Gate 4)
+    ("5th floor", "the office is on the", ""),            # window: address, no invite
+    ("the beaches are amazing", "i love goa", ""),        # window: city/venue, no invite
 ]
 
 # (text, prior_text, sender_name)
@@ -117,6 +127,13 @@ MALICIOUS: list[tuple[str, str, str]] = [
     ("你好 friend", "", ""),               # chinese mixed with english
     ("привет", "", ""),                   # cyrillic
     ("hey मित्र how are you", "", ""),      # devanagari mixed in
+    # MEETING/LOCATION hardening (v2.5): real rendezvous + structured pins.
+    ("lets meet at bells resort at dinner", "", ""),  # invite + governed venue
+    ("lets meet 5th flor", "", ""),                   # invite + address (typo'd floor)
+    ("flat 302 tower 2", "", ""),                     # full multi-part address
+    ("19.0760, 72.8777", "", ""),                     # geo coordinates
+    ("at bells resort", "meet me", ""),               # window: invite + prep-venue completer
+    ("floor", "lets meet 5th", ""),                   # window: split address, invite-coupled
 ]
 
 

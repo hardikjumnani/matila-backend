@@ -43,9 +43,11 @@ from apps.privacy.suspicion_data import (
     CONTACT_INTENT_MARKERS,
     DEFAULT_SIGNAL_WEIGHTS,
     GIBBERISH_ALLOWLIST,
+    INVITE_MARKERS,
     NON_LATIN_RANGES,
     REVERSAL_CUES,
     ROMANIZED_INDIC_MARKERS,
+    VENUE_MARKERS,
     VOWELS,
     ZERO_WIDTH_CODES,
 )
@@ -104,6 +106,7 @@ class SuspicionGuard:
         self._contact(fp, collapsed, emit)
         self._self_name(collapsed, sender_name, emit)
         self._entropy(fp, emit)
+        self._meeting(normalize.fold_base(raw), emit)
         self._behavioral(raw, prior_messages, emit)
 
         hits = tuple(found.values())
@@ -255,6 +258,21 @@ class SuspicionGuard:
             ):
                 emit("ENTROPY_TOKEN", tok[:20])
                 break
+
+    # -- pii/ambient: meeting & location (sub-threshold) --------------------
+    @staticmethod
+    def _meeting(fb, emit) -> None:
+        """Sub-threshold rendezvous/location tells for admin context. An invite +
+        a vague place is MEETING_SOFT (pii); several lone place words with no invite
+        are LOCATION_SOFT (ambient -> recorded but excluded from the ranking score,
+        so ordinary getting-to-know narrowing never climbs the queue). Matched on the
+        unsqueezed fold_base view (invite/venue words contain doubled letters that the
+        primary view would collapse)."""
+        venues = {v for v in VENUE_MARKERS if re.search(r"\b" + re.escape(v) + r"\b", fb)}
+        if venues and any(m in fb for m in INVITE_MARKERS):
+            emit("MEETING_SOFT", "invite+" + sorted(venues)[0])
+        elif len(venues) >= 2:
+            emit("LOCATION_SOFT", " ".join(sorted(venues)[:4]))
 
     # -- behavioral (cross-message / cadence) ------------------------------
     @staticmethod

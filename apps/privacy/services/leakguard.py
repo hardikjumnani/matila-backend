@@ -81,6 +81,56 @@ _LOW = LeakSeverity.LOW.value
 _MEETING_SIGNALS = {"INVITE", "DESTINATION", "TIME", "DIRECTIONS", "LOCATION_PIN"}
 _ASK_PLATFORM_DIST = 25
 _STEER_PLATFORM_DIST = 20
+
+# -- Meeting / location (rendezvous) ------------------------------------------
+# Proximity is CHARACTER distance on the fold_primary view (same unit as the
+# ASK/STEER distances above). See docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md.
+_LOC_PREP_VENUE_DIST = 16      # a preposition governs a venue this many chars before it
+_INVITE_VENUE_DIST = 26       # invite <-> governed venue (single message)
+_MEETING_WINDOW_DIST = 26     # invite/directions <-> place across the window (Gate 1)
+_COMPLETER_MAX_TOKENS = 4     # a bare place fragment is at most this many tokens (Gate 4 C2)
+
+# Locational prepositions: a place mention governed by one is a destination, not a
+# passing reference. Used for single-message coupling and the Gate-4 completer shape.
+_LOC_PREPS = ("at", "to", "in", "on", "near", "outside", "behind", "opp",
+              "opposite", "beside", "inside")
+_LOC_PREP_RE = re.compile(r"\b(?:" + "|".join(_LOC_PREPS) + r")\b")
+_LOC_PREP_START = frozenset(_LOC_PREPS)
+
+# Address components WITH a number (actionable locators on their own, like a pin).
+_FLOOR_RE = re.compile(r"\b\d{1,3}\s*(?:st|nd|rd|th)?\s*(?:floor|flr|flor|manzil)\b")
+_ADDR_RE = re.compile(
+    r"\b(?:flat|room|plot|tower|block|gate|wing|sector|house|shop|door|"
+    r"apartment|apt|bldg|building|h\.?\s*no)\s*(?:no\.?|number|#)?\s*\d{1,4}\b"
+)
+
+# Structured location pins: format-distinctive, standalone-blockable, zero-FP.
+_MAP_URL_RE = re.compile(
+    r"maps\.google|maps\.app\.goo\.gl|goo\.gl/maps|g\.co/maps|openstreetmap|"
+    r"osm\.org|what3words\.com"
+)
+# lat,long with >=4 decimals each (common decimals / prices have fewer); range-checked.
+_GEO_RE = re.compile(r"[-+]?\d{1,2}\.\d{4,}\s*,\s*[-+]?\d{1,3}\.\d{4,}")
+_PLUSCODE_RE = re.compile(r"\b[23456789cfghjmpqrvwx]{4,8}\+[23456789cfghjmpqrvwx]{2,3}\b")
+_W3W_RE = re.compile(r"///[a-z]{3,}\.[a-z]{3,}\.[a-z]{3,}")
+
+# Gate-4 (completer shape) word sets. A bare place FRAGMENT completes an invite; an
+# independent status clause (subject pronoun + finite verb) does not. Positive
+# whitelist, so any unlisted shape UNDER-blocks and can never create a false positive.
+_FILLER_TOKENS = frozenset({
+    "ok", "okay", "sure", "yeah", "yea", "yes", "cool", "fine", "k", "kk",
+    "haan", "han", "ha", "thik", "theek", "achha", "acha", "btw", "hmm", "arre", "arey",
+})
+_FINITE_VERBS = frozenset({
+    "is", "are", "was", "were", "am", "be", "been", "being", "do", "did", "does",
+    "have", "has", "had", "go", "going", "went", "goes", "gone", "live", "living",
+    "stay", "staying", "stayed", "study", "studying", "work", "working", "like",
+    "love", "loved", "liked", "saw", "see", "seen", "visit", "visited", "reach",
+    "reached", "came", "got", "get", "will", "ll", "gonna", "wanna", "shall",
+})
+_SUBJECT_PRONOUNS = frozenset({"i", "we", "you", "he", "she", "they", "it",
+                               "im", "ive", "ill", "id", "youre", "were"})
+
 _SELF_NAME_MIN_TOKEN = 3
 _SELF_NAME_GLUE_MIN = 6    # only tokens this long get the unbounded (glued) match
 _SPELL_RUN_MIN = 3         # a run of >= this many single-char tokens = spelled-out
@@ -307,7 +357,14 @@ class LeakGuard:
             window_cats = self._block_categories(prior_text + " " + raw, sender_name)
             prior_cats = self._block_categories(prior_text, sender_name)
             for cat in window_cats - prior_cats:
+                # MEETING is handled by the tightly gated _meeting_window below
+                # (proximity + completer-shape), NOT the loose presence diff.
+                if cat == LeakCategory.MEETING.value:
+                    continue
                 hits.append(Hit(cat, _HIGH, "window", "<cross-message>"))
+            meeting_window = self._meeting_window(prior_text, raw)
+            if meeting_window is not None:
+                hits.append(meeting_window)
 
         action = (
             LeakAction.BLOCK.value
@@ -414,12 +471,8 @@ class LeakGuard:
     # -- keyword / meeting signals -----------------------------------------
     def _signal_scan(self, ctx: _Context, *, suppress_platform: bool) -> list[Hit]:
         # Primary (boundary-checked) view, plus its leet twin (positions align).
-        prim_pos: dict[str, list[int]] = defaultdict(list)
         fp = ctx.fold_primary
-        for view in (fp, fp.translate(_LEET)):
-            for start, _end, signals in dictionaries.scan_primary(view):
-                for sig in signals:
-                    prim_pos[sig].append(start)
+        prim_pos = self._prim_positions(fp)
         present = {s for s, p in prim_pos.items() if p}
 
         # Presence-only signals from the glued view (collapsed, gated) and the
@@ -450,11 +503,9 @@ class LeakGuard:
         if steer:
             hits.append(Hit(LeakCategory.STEERING.value, _HIGH, "steering", "<steer>"))
 
-        meet = {s for s in _MEETING_SIGNALS if s in any_present}
-        if self._meeting_blocks(meet):
-            hits.append(
-                Hit(LeakCategory.MEETING.value, _HIGH, "meeting", "+".join(sorted(meet)))
-            )
+        meet_span = self._meeting_single(ctx, prim_pos, any_present, extra)
+        if meet_span is not None:
+            hits.append(Hit(LeakCategory.MEETING.value, _HIGH, "meeting", meet_span))
 
         if not hits and not suppress_platform and "PLATFORM" in any_present:
             hits.append(Hit(LeakCategory.PLATFORM.value, _LOW, "platform_mention", "<platform>"))
@@ -465,19 +516,157 @@ class LeakGuard:
         return any(len(tok) >= _GLUE_MIN_TOKEN for tok in fold_primary.split())
 
     @staticmethod
-    def _meeting_blocks(present: set[str]) -> bool:
-        if "LOCATION_PIN" in present:
+    def _prim_positions(fold_primary: str) -> dict[str, list[int]]:
+        """Signal -> character offsets on the primary view (and its leet twin, whose
+        offsets align). Shared by the single-message scan and the window detector."""
+        pos: dict[str, list[int]] = defaultdict(list)
+        for view in (fold_primary, fold_primary.translate(_LEET)):
+            for start, _end, signals in dictionaries.scan_primary(view):
+                for sig in signals:
+                    pos[sig].append(start)
+        return pos
+
+    # -- meeting / location (single message) --------------------------------
+    def _meeting_single(
+        self, ctx: _Context, prim_pos: dict[str, list[int]],
+        any_present: set[str], extra: set[str],
+    ) -> str | None:
+        """Single-message rendezvous/location block. Venue coupling uses PROXIMITY
+        to a locational preposition + INVITE (not bare presence) so an unrelated
+        venue mention beside an invite does not false-positive. Structured pins and
+        full multi-part addresses block standalone (format-distinctive)."""
+        fb = ctx.fold_base
+        pin = self._structured_pin(fb)
+        if pin is not None:
+            return "pin:" + pin[:40]
+        addr = self._full_address(fb)
+        if addr is not None:
+            return "address:" + addr[:40]
+        if "LOCATION_PIN" in any_present:
+            return "location_pin"
+        invites = prim_pos.get("INVITE", [])
+        dests = prim_pos.get("DESTINATION", [])
+        dirs = prim_pos.get("DIRECTIONS", [])
+        fp = ctx.fold_primary
+        preps = [m.start() for m in _LOC_PREP_RE.finditer(fp)]
+        governed = [d for d in dests
+                    if any(0 <= d - p <= _LOC_PREP_VENUE_DIST for p in preps)]
+        if invites and governed and _near(invites, governed, _INVITE_VENUE_DIST):
+            return "invite+venue"
+        if invites and self._address_component(fb):
+            return "invite+address"
+        if dirs and dests:  # directions already point at a place (existing behaviour)
+            return "directions+venue"
+        # Fuzzy/glued venue (positionless evasion, e.g. "cantin"): only when there is
+        # NO clean positioned venue to proximity-check, so a real venue that simply
+        # is not invite-governed ("the resort was nice, wanna meet") does not block.
+        if invites and not dests and "DESTINATION" in extra:
+            return "invite+venue_fuzzy"
+        return None
+
+    # -- meeting / location (multi-message window) --------------------------
+    def _meeting_window(self, prior_text: str, raw: str) -> Hit | None:
+        """Gated cross-message rendezvous (docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md
+        section 3A). Fires only when the window now completes a rendezvous that the
+        prior text did not already contain. Gates: proximity (not presence), an
+        actionable place, and a completer-shape check on the CURRENT message that
+        rejects an independent status clause ("I was at the cafe")."""
+        if not (raw or "").strip():
+            return None
+        span = self._window_pair(prior_text + " " + raw, raw)
+        if span is None:
+            return None
+        if self._window_pair(prior_text, None) is not None:
+            return None  # the pair already existed -> this message did not complete it
+        return Hit(LeakCategory.MEETING.value, _HIGH, "meeting_window", span)
+
+    def _window_pair(self, text: str, completer: str | None) -> str | None:
+        """A gated meeting pair in ``text``. ``completer`` is the current message
+        whose shape Gate 4 checks (None skips the shape gate, used for the prior-only
+        'already existed?' comparison). Pins / full addresses / location-pin phrases
+        are actionable standalone; venue and address coupling require an INVITE (or
+        DIRECTIONS) nearby AND, for venues, a locational-fragment completer."""
+        fb = normalize.fold_base(text)
+        pin = self._structured_pin(fb)
+        if pin is not None:
+            return "pin:" + pin[:40]
+        addr = self._full_address(fb)
+        if addr is not None:
+            return "address:" + addr[:40]
+        pos = self._prim_positions(normalize.fold_primary(text))
+        if pos.get("LOCATION_PIN"):
+            return "location_pin"
+        invites = pos.get("INVITE", [])
+        dests = pos.get("DESTINATION", [])
+        dirs = pos.get("DIRECTIONS", [])
+        if completer is not None and not self._is_place_completer(completer):
+            return None
+        if invites and self._address_component(fb):
+            return "invite+address"
+        if invites and dests and _near(invites, dests, _MEETING_WINDOW_DIST):
+            return "invite+venue"
+        if dirs and dests and _near(dirs, dests, _MEETING_WINDOW_DIST):
+            return "directions+venue"
+        return None
+
+    @staticmethod
+    def _is_place_completer(raw: str) -> bool:
+        """Gate 4: is the current message a bare locational FRAGMENT (completes an
+        invite) rather than an independent status clause? Positive whitelist, so an
+        unlisted shape under-blocks and never false-positives."""
+        toks = normalize.fold_base(raw).split()
+        i = 0
+        while i < len(toks) and toks[i] in _FILLER_TOKENS:
+            i += 1
+        rest = toks[i:]
+        if not rest:
+            return False
+        if rest[0] in _LOC_PREP_START:  # C1: "at bells resort", "to the cafe"
             return True
-        # INVITE + TIME with NO place is deliberately NOT a block: it false-positives
-        # on ordinary / poetic lines ("kal milte hain", "let's meet tomorrow"). A
-        # real actionable meetup needs a place or directions. See
-        # docs/VEIL_MEETING_PRECISION_PLAN.md. The sub-threshold INVITE+TIME case is
-        # routed to the suspicion engine instead (CONTACT_INTENT_SOFT class).
-        if "INVITE" in present and present & {"DESTINATION", "DIRECTIONS"}:
-            return True
-        if "DIRECTIONS" in present and "DESTINATION" in present:
+        if (len(rest) <= _COMPLETER_MAX_TOKENS  # C2: short place-only fragment
+                and not any(t in _FINITE_VERBS for t in rest)
+                and not any(t in _SUBJECT_PRONOUNS for t in rest)):
             return True
         return False
+
+    @staticmethod
+    def _structured_pin(fold_base: str) -> str | None:
+        m = _MAP_URL_RE.search(fold_base)
+        if m:
+            return m.group(0)
+        for m in _GEO_RE.finditer(fold_base):
+            try:
+                lat_s, lon_s = m.group(0).split(",")
+                if abs(float(lat_s)) <= 90 and abs(float(lon_s)) <= 180:
+                    return m.group(0)
+            except ValueError:
+                continue
+        m = _PLUSCODE_RE.search(fold_base)
+        if m:
+            return m.group(0)
+        m = _W3W_RE.search(fold_base)
+        if m:
+            return m.group(0)
+        return None
+
+    @staticmethod
+    def _address_component(fold_base: str) -> bool:
+        if _FLOOR_RE.search(fold_base) or _ADDR_RE.search(fold_base):
+            return True
+        # Character-spelled ("f l a t 3 0 2"): collapse_base would glue the component
+        # onto the preceding word and kill its \b boundary, so scan the ISOLATED
+        # spelled run instead (same restore-the-boundary trick as self-name Tier 4).
+        for run in LeakGuard._spelled_runs(fold_base):
+            if _FLOOR_RE.search(run) or _ADDR_RE.search(run):
+                return True
+        return False
+
+    @staticmethod
+    def _full_address(fold_base: str) -> str | None:
+        """A multi-part address ("flat 302 tower 2") is actionable on its own."""
+        parts = [m.group(0) for m in _ADDR_RE.finditer(fold_base)]
+        parts += [m.group(0) for m in _FLOOR_RE.finditer(fold_base)]
+        return " ".join(parts[:3]) if len(parts) >= 2 else None
 
     @staticmethod
     def _platform_handle(fold_base: str) -> Hit | None:

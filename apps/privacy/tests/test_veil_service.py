@@ -19,13 +19,17 @@ from apps.users.models import User
 class _StubConfig:
     """Minimal ConfigurationService stand-in to control mode/flag in tests."""
 
-    def __init__(self, *, enabled=True, mode=VeilMode.ENFORCE.value, window=120, threshold=5):
+    def __init__(self, *, enabled=True, mode=VeilMode.ENFORCE.value, window=120,
+                 threshold=5, meeting_window_enforce=True):
         self.enabled = enabled
         self.mode = mode
         self.window = window
         self.threshold = threshold
+        self.meeting_window_enforce = meeting_window_enforce
 
     def is_feature_enabled(self, key):
+        if key == FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE:
+            return self.meeting_window_enforce
         return self.enabled
 
     def get_config(self, key, default=None):
@@ -148,6 +152,46 @@ class VeilServiceTests(TestCase):
             chat=self.chat, sender=self.user, text="lets meet at the canteen tomorrow"
         )
         self.assertTrue(plan.blocked)
+
+    def test_window_meeting_enforced_blocks_and_strikes(self):
+        # Invite in one message + an actionable place completer in the next ->
+        # gated cross-message meeting block (flag ON by default).
+        svc = self._svc()
+        d1 = svc.inspect_text(chat=self.chat, sender=self.user, text="meet me")
+        self.assertFalse(d1.blocked)
+        self._persist("meet me")  # sent -> enters the window
+        d2 = svc.inspect_text(chat=self.chat, sender=self.user, text="at bells resort")
+        self.assertTrue(d2.blocked)
+        self.assertEqual(d2.category, "MEETING")
+        event = LeakEvent.objects.get(user=self.user, mode=VeilMode.ENFORCE.value)
+        self.assertIn("meeting_window", event.detectors)
+        self.assertEqual(LeakStrike.objects.get(user=self.user).count, 1)
+
+    def test_window_meeting_shadow_when_flag_off(self):
+        # Kill-switch: flag OFF -> the window meeting hit is logged as shadow and
+        # ALLOWED (no block, no strike). Everything else still enforces.
+        svc = self._svc(meeting_window_enforce=False)
+        svc.inspect_text(chat=self.chat, sender=self.user, text="meet me")
+        self._persist("meet me")
+        d = svc.inspect_text(chat=self.chat, sender=self.user, text="at bells resort")
+        self.assertFalse(d.blocked)  # allowed
+        event = LeakEvent.objects.get(user=self.user)
+        self.assertEqual(event.mode, VeilMode.SHADOW.value)
+        self.assertIn("meeting_window", event.detectors)
+        self.assertFalse(LeakStrike.objects.filter(user=self.user).exists())
+
+    def test_window_meeting_flag_off_still_blocks_phone(self):
+        # The kill-switch is scoped to the meeting-window detector only: a real
+        # phone across messages still blocks even with the flag off.
+        svc = self._svc(meeting_window_enforce=False)
+        svc.inspect_text(
+            chat=self.chat, sender=self.user, text="my number is nine eight seven six"
+        )
+        self._persist("my number is nine eight seven six")
+        d = svc.inspect_text(
+            chat=self.chat, sender=self.user, text="five four three two one zero"
+        )
+        self.assertTrue(d.blocked)
 
     def test_shadow_mode_allows_but_records(self):
         svc = self._svc(mode=VeilMode.SHADOW.value)

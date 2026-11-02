@@ -65,6 +65,11 @@ LANGUAGES: dict[str, dict] = {
             "metro", "metro station", "station", "bus stop", "mall", "park",
             "food court", "block", "cabin", "amphitheatre", "amphi", "quad",
             "lawn", "lawns", "corridor",
+            # Off-campus physical venues (curated; no brand names). Only block when
+            # coupled to an INVITE/preposition or a completer fragment (see
+            # docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md), so a passing mention is safe.
+            "resort", "hotel", "restaurant", "dhaba", "beach", "airport", "cinema",
+            "stadium", "pg", "dorm", "pub", "theatre", "theater", "food street",
         ],
         "time_words": [
             "today", "tonight", "tomorrow", "tmrw", "morning", "afternoon",
@@ -95,7 +100,8 @@ LANGUAGES: dict[str, dict] = {
                          "baahar milte", "bahar milte"],
         "destination_words": ["canteen", "mess", "hostel", "gate", "maidan",
                               "ground", "cafe", "library", "metro", "station",
-                              "chowk", "adda"],
+                              "chowk", "adda", "resort", "hotel", "beach",
+                              "dhaba", "restaurant"],
         "time_words": ["aaj", "kal", "abhi", "subah", "shaam", "sham", "dopahar",
                        "raat", "baje", "baad me", "lunch ke baad"],
         "direction_words": ["aa jao", "pahunch", "pahuch", "bahar aa", "baahar aa",

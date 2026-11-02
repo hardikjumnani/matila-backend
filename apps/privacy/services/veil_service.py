@@ -26,7 +26,13 @@ from apps.privacy.constants import (
     MAX_ACCUMULATED_DIGITS,
     MAX_WINDOW_CHARS,
 )
-from apps.privacy.enums import LeakAction, LeakCategory, VeilMode, ViolationSource
+from apps.privacy.enums import (
+    LeakAction,
+    LeakCategory,
+    LeakSeverity,
+    VeilMode,
+    ViolationSource,
+)
 from apps.privacy.models import LeakEvent, LeakStrike
 from apps.privacy.services.leakguard import LeakGuard, Verdict, extract_digits
 
@@ -100,6 +106,21 @@ class VeilService:
             or DEFAULT_ESCALATE_THRESHOLD
         )
 
+    def _meeting_window_enforced(self) -> bool:
+        return self._config.is_feature_enabled(
+            FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE
+        )
+
+    @staticmethod
+    def _window_meeting_only(verdict: Verdict) -> bool:
+        """True when every block-worthy hit comes from the gated cross-message
+        meeting detector (so the Tier-2 kill-switch governs the whole decision)."""
+        blocking = [
+            h for h in verdict.hits
+            if h.severity in (LeakSeverity.HIGH.value, LeakSeverity.MEDIUM.value)
+        ]
+        return bool(blocking) and all(h.detector == "meeting_window" for h in blocking)
+
     # -- public API ---------------------------------------------------------
     def inspect_text(self, *, chat, sender, text: str) -> VeilDecision:
         """Scan one outgoing text message. Returns a decision the caller acts on.
@@ -129,6 +150,15 @@ class VeilService:
         )
 
         if not verdict.blocked:
+            return VeilDecision(blocked=False)
+
+        # Tier-2 kill-switch: when the ONLY thing making this block is the gated
+        # cross-message meeting detector and the flag is off, log it as a shadow
+        # event and allow (no block, no strike). See VEIL_MEETING_LOCATION_IMPL_PLAN.
+        if self._window_meeting_only(verdict) and not self._meeting_window_enforced():
+            self._record_event(
+                chat, sender, verdict, LeakAction.BLOCK.value, VeilMode.SHADOW.value, text
+            )
             return VeilDecision(blocked=False)
 
         mode = self._mode()

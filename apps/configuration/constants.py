@@ -71,6 +71,10 @@ class FeatureFlagKey:
     IMAGE_MESSAGES_ENABLED = "image_messages_enabled"
     MAINTENANCE_MODE = "maintenance_mode"
     VEIL_ENABLED = "veil_enabled"
+    # Tier-2 cross-message meeting/location block (gated proximity + completer shape).
+    # ON = enforce the `meeting_window` hard block; OFF = log it as a shadow event and
+    # allow (instant revert path). See docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md.
+    VEIL_MEETING_WINDOW_ENFORCE = "veil_meeting_window_enforce"
     MUFFLE_ENABLED = "muffle_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
@@ -167,6 +171,9 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     FeatureFlagKey.IMAGE_MESSAGES_ENABLED: True,
     FeatureFlagKey.MAINTENANCE_MODE: False,
     FeatureFlagKey.VEIL_ENABLED: True,
+    # Tier-2 cross-message meeting/location block. ON by default (the gates make it
+    # zero-FP); runtime kill-switch to drop to log-only if prod ever surfaces an FP.
+    FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE: True,
     FeatureFlagKey.MUFFLE_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
     # One-time first-reveal coin discount. ON by default; runtime kill-switch.

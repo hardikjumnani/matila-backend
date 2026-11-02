@@ -14,7 +14,7 @@ is normal for this user base never drives a user up the admin queue.
 
 from __future__ import annotations
 
-SUSPICION_RULE_VERSION = "2026.10.26-suspicion-v2"
+SUSPICION_RULE_VERSION = "2026.11.01-suspicion-v3"
 
 # -- Signal classes -----------------------------------------------------------
 # ambient     = normal for this user base (romanized Hindi, non-Latin, gibberish).
@@ -48,6 +48,9 @@ SIGNAL_CLASS: dict[str, str] = {
     "CHAR_BURST": CLASS_BEHAVIORAL,
     "CROSS_MESSAGE": CLASS_BEHAVIORAL,
     "BLOCKED_LEAK": CLASS_BEHAVIORAL,
+    # Tier-3 meeting/location (sub-threshold rendezvous Veil does not hard-block).
+    "MEETING_SOFT": CLASS_PII,       # an invite paired with a vague place
+    "LOCATION_SOFT": CLASS_AMBIENT,  # lone place hints (benign narrowing) -> context only
 }
 
 # Signals excluded from the priority (tier/ranking) score. They still record.
@@ -83,6 +86,9 @@ DEFAULT_SIGNAL_WEIGHTS: dict[str, int] = {
     "CHAR_BURST": 2,
     "CROSS_MESSAGE": 4,
     "BLOCKED_LEAK": 5,
+    # meeting / location (soft)
+    "MEETING_SOFT": 3,
+    "LOCATION_SOFT": 1,
 }
 
 # Decay + tier defaults (admin-overridable). The priority score decays with this
@@ -155,6 +161,22 @@ CONTACT_INTENT_MARKERS: tuple[str, ...] = (
     "reach me", "hit me up", "follow me", "catch me", "search my", "same user",
     "same username", "find my", "look me up",
 )
+
+# -- Meeting / location soft signals (Tier 3) ---------------------------------
+# Veil hard-blocks a validator-certain rendezvous; these catch the sub-threshold
+# cousins for admin CONTEXT only: an invite + a vague place (MEETING_SOFT), or
+# several lone place hints with no invite (LOCATION_SOFT, ambient -> not ranked, so
+# ordinary getting-to-know narrowing like hostel/year/city never climbs the queue).
+INVITE_MARKERS: tuple[str, ...] = (
+    "lets meet", "let's meet", "wanna meet", "shall we meet", "can we meet",
+    "meet up", "meet me", "come over", "come meet", "catch up", "see you there",
+    "milte hain", "milte hai", "aa jao", "milte hain",
+)
+VENUE_MARKERS: frozenset[str] = frozenset({
+    "resort", "hotel", "cafe", "canteen", "hostel", "station", "metro", "mall",
+    "beach", "restaurant", "dhaba", "library", "ground", "airport", "cinema",
+    "stadium", "gate", "campus", "park", "pg", "dorm",
+})
 
 # -- Spelled-digit collision words (PARTIAL_DIGITS only) ----------------------
 # Number words that collide with English, deliberately kept OUT of Veil's phone

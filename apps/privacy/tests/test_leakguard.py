@@ -360,6 +360,99 @@ class EvasionV21Tests(SimpleTestCase):
         self.assertFalse(self.g.scan("decaffeinated coffee is the best").blocked)
 
 
+class MeetingLocationTests(SimpleTestCase):
+    """Meeting / location hardening (docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md):
+    single-message pins/address/venue coupling, and the gated multi-message
+    window (proximity + completer-shape, zero-FP). Each ``|`` in a comment is a
+    separate sender message; ``prior`` is the join of the earlier ones."""
+
+    def setUp(self) -> None:
+        self.g = LeakGuard()
+
+    def _b(self, text, prior="", name=""):
+        return self.g.scan(
+            text, prior_text=prior, prior_digits=extract_digits(prior), sender_name=name
+        ).blocked
+
+    # -- single message: BLOCK ---------------------------------------------
+    def test_driving_case_invite_venue(self):
+        self.assertTrue(self._b("lets meet at bells resort at dinner"))
+
+    def test_invite_floor_typo(self):
+        self.assertTrue(self._b("lets meet 5th flor"))
+
+    def test_full_address_standalone(self):
+        self.assertTrue(self._b("flat 302 tower 2"))
+
+    def test_map_url_standalone(self):
+        self.assertTrue(self._b("here maps.app.goo.gl/xY7q2"))
+
+    def test_geo_coords_standalone(self):
+        self.assertTrue(self._b("19.0760, 72.8777"))
+
+    # -- single message: ALLOW (zero-FP) -----------------------------------
+    def test_bare_city_and_venue_allowed(self):
+        self.assertFalse(self._b("i love goa and the beach"))
+
+    def test_bare_floor_allowed(self):
+        self.assertFalse(self._b("the office is on the 5th floor"))
+
+    def test_venue_without_invite_allowed(self):
+        self.assertFalse(self._b("the resort was really nice"))
+
+    def test_invite_without_place_allowed(self):
+        self.assertFalse(self._b("lets meet up sometime next week"))
+
+    def test_prices_not_geo_coords(self):
+        self.assertFalse(self._b("the prices were 1.99, 2.99 only"))
+
+    def test_venue_with_invite_far_apart_allowed(self):
+        # invite and venue present but not preposition-governed / not near.
+        self.assertFalse(self._b("the resort was nice, wanna meet tomorrow"))
+
+    # -- multi-message window: BLOCK ---------------------------------------
+    def test_window_prep_venue_completer(self):
+        self.assertTrue(self._b("at bells resort", prior="meet me"))
+
+    def test_window_split_floor(self):
+        self.assertTrue(self._b("floor", prior="lets meet 5th"))
+
+    def test_window_split_address(self):
+        self.assertTrue(self._b("flat 302", prior="come over"))
+
+    def test_window_romanized_invite_venue(self):
+        self.assertTrue(self._b("station", prior="aa jao"))
+
+    def test_window_split_coords(self):
+        self.assertTrue(self._b("72.8777", prior="19.0760,"))
+
+    def test_window_charspelled_address(self):
+        # "f l a t 3" completes the component; blocks the moment the digit lands.
+        self.assertTrue(self._b("3", prior="lets meet f l a t"))
+
+    # -- multi-message window: ALLOW (zero-FP gate) ------------------------
+    def test_window_status_clause_allowed(self):
+        self.assertFalse(self._b("I was at the cafe earlier", prior="lets meet up"))
+
+    def test_window_bare_venue_answer_allowed(self):
+        self.assertFalse(self._b("Uniworld 1", prior="which hostel"))
+
+    def test_window_floor_no_invite_allowed(self):
+        self.assertFalse(self._b("5th floor", prior="the office is on the"))
+
+    def test_window_city_talk_allowed(self):
+        self.assertFalse(self._b("the beaches are amazing", prior="I love goa"))
+
+    def test_window_invite_time_allowed(self):
+        self.assertFalse(self._b("sometime next week", prior="let's meet up"))
+
+    def test_window_transitive_meet_allowed(self):
+        self.assertFalse(self._b("your friend at the cafe", prior="did you meet"))
+
+    def test_window_status_resort_allowed(self):
+        self.assertFalse(self._b("I loved bells resort btw", prior="lets catch up"))
+
+
 class HelperTests(SimpleTestCase):
     def test_extract_digits_mixed(self):
         self.assertEqual(extract_digits("two cats 3 dogs nine"), "239")

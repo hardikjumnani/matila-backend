@@ -124,6 +124,10 @@ FEATURE_FLAG_SEED: dict[str, tuple[bool, str]] = {
         True,
         "One-time discounted price for a user's first reveal.",
     ),
+    FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE: (
+        True,
+        "Enforce the gated cross-message meeting/location block (OFF = shadow log).",
+    ),
 }
 
 

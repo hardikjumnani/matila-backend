@@ -187,6 +187,15 @@ class ChatService:
     def is_participant(self, chat: Chat, user: User) -> bool:
         return ChatParticipant.objects.filter(chat=chat, user=user).exists()
 
+    def other_participant_ids(self, chat: Chat, exclude_user_id) -> list:
+        """User ids of the chat's participants other than ``exclude_user_id``
+        (two-person today, but returned as a list for generality)."""
+        return list(
+            ChatParticipant.objects.filter(chat=chat)
+            .exclude(user_id=exclude_user_id)
+            .values_list("user_id", flat=True)
+        )
+
     def is_writable(self, chat: Chat) -> bool:
         return chat.status in self.WRITABLE_STATUSES
 

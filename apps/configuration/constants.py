@@ -49,6 +49,10 @@ class AppConfigKey:
     CHAT_EXPIRY_WARNING_MINUTES = "chat_expiry_warning_minutes"
     # Emoji set for message reactions (runtime-editable, like the gesture pool).
     REACTION_EMOJIS = "reaction_emojis"
+    # Chat push notifications: per-(chat, recipient) cooldown to coalesce rapid
+    # events into one ping. See docs/CHAT_PUSH_NOTIFICATIONS_PLAN.md.
+    CHAT_PUSH_COOLDOWN_SECONDS = "chat_push_cooldown_seconds"
+    CHAT_REACTION_PUSH_COOLDOWN_SECONDS = "chat_reaction_push_cooldown_seconds"
     # Veil (anti-leakage) engine, see docs/VEIL_ENGINE_PLAN.md.
     VEIL_MODE = "veil_mode"  # "shadow" | "enforce"
     VEIL_WINDOW_SECONDS = "veil_window_seconds"  # legacy (time window); superseded
@@ -76,6 +80,9 @@ class FeatureFlagKey:
     # allow (instant revert path). See docs/VEIL_MEETING_LOCATION_IMPL_PLAN.md.
     VEIL_MEETING_WINDOW_ENFORCE = "veil_meeting_window_enforce"
     MUFFLE_ENABLED = "muffle_enabled"
+    # Chat push notifications (new message / reaction). Master + reaction kill-switch.
+    CHAT_PUSH_ENABLED = "chat_push_enabled"
+    CHAT_REACTION_PUSH_ENABLED = "chat_reaction_push_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
     # One-time first-reveal coin discount (coin_cost_reveal_first). ON by default.
@@ -115,6 +122,9 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     # same default and falls back to it offline). Served via GET /config.
     AppConfigKey.REACTION_EMOJIS: ["❤️", "\U0001F602", "\U0001F62E",
                                    "\U0001F622", "\U0001F44D", "\U0001F525"],
+    # CHOSEN: chat-push cooldowns (seconds) per (chat, recipient) to coalesce bursts.
+    AppConfigKey.CHAT_PUSH_COOLDOWN_SECONDS: 45,
+    AppConfigKey.CHAT_REACTION_PUSH_COOLDOWN_SECONDS: 120,
     # CHOSEN: Veil anti-leakage engine. Mode starts at "enforce" so the control
     # is active in dev; production should run "shadow" first to tune (see plan).
     AppConfigKey.VEIL_MODE: "enforce",
@@ -175,6 +185,9 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     # zero-FP); runtime kill-switch to drop to log-only if prod ever surfaces an FP.
     FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE: True,
     FeatureFlagKey.MUFFLE_ENABLED: True,
+    # Chat push notifications: ON by default; reactions separately killable.
+    FeatureFlagKey.CHAT_PUSH_ENABLED: True,
+    FeatureFlagKey.CHAT_REACTION_PUSH_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
     # One-time first-reveal coin discount. ON by default; runtime kill-switch.
     FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED: True,

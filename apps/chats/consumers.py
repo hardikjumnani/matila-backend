@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from apps.chats.models import Chat, ChatParticipant
 from apps.chats.services.chat_service import ChatService
-from apps.common.realtime import chat_group_name, presence_key
+from apps.common.realtime import chat_group_name, chat_presence_key, presence_key
 from apps.messaging.services.message_service import MessageService
 
 logger = logging.getLogger(__name__)
@@ -168,8 +168,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await database_sync_to_async(cache.set)(
                 self._presence_key(), timezone.now().isoformat(), PRESENCE_TTL_SECONDS
             )
+            # Per-chat presence: lets the chat-push task skip a recipient who is
+            # currently reading THIS chat (the per-user key alone is too coarse).
+            await database_sync_to_async(cache.set)(
+                self._chat_presence_key(), "1", PRESENCE_TTL_SECONDS
+            )
         else:
             await database_sync_to_async(cache.delete)(self._presence_key())
+            await database_sync_to_async(cache.delete)(self._chat_presence_key())
         # Presence is visible only to the other participant.
         await self._group_broadcast(
             "presence.update",
@@ -219,6 +225,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     def _presence_key(self) -> str:
         return presence_key(self.user.id)
+
+    def _chat_presence_key(self) -> str:
+        return chat_presence_key(self.chat_id, self.user.id)
 
     # -- Synchronous DB work (run in a thread) ------------------------------
 

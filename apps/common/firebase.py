@@ -110,21 +110,36 @@ def send_push(
     title: str,
     body: str,
     data: dict[str, str] | None = None,
+    collapse_key: str | None = None,
 ) -> PushResult:
     """Send a notification to many device tokens via FCM (HTTP v1).
 
     Returns per-batch success/failure counts and the subset of tokens FCM
     reported as invalid/unregistered so the caller can deactivate them. Never
     used with the deprecated legacy server key — this is the Admin SDK path.
+
+    ``collapse_key`` coalesces on the device: a newer push with the same key
+    REPLACES the older banner (one per chat), on both Android (collapse key +
+    notification tag) and iOS (apns-collapse-id).
     """
     if not tokens:
         return PushResult(success_count=0, failure_count=0, invalid_tokens=[])
+
+    android = apns = None
+    if collapse_key:
+        android = messaging.AndroidConfig(
+            collapse_key=collapse_key,
+            notification=messaging.AndroidNotification(tag=collapse_key),
+        )
+        apns = messaging.APNSConfig(headers={"apns-collapse-id": collapse_key})
 
     message = messaging.MulticastMessage(
         tokens=tokens,
         notification=messaging.Notification(title=title, body=body),
         # FCM data values must be strings.
         data={key: str(value) for key, value in (data or {}).items()},
+        android=android,
+        apns=apns,
     )
     response = messaging.send_each_for_multicast(message, app=_get_app())
 

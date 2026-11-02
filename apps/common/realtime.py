@@ -39,6 +39,13 @@ def presence_key(user_id) -> str:
     return f"presence:user:{user_id}"
 
 
+def chat_presence_key(chat_id, user_id) -> str:
+    """Cache key for a user's presence in a SPECIFIC chat (truthy while their
+    socket for that chat is connected). Lets push delivery skip a recipient who is
+    already reading the chat. Written by the consumer; read by the chat-push task."""
+    return f"presence:chat:{chat_id}:{user_id}"
+
+
 def build_group_message(
     event: str, payload: dict[str, Any], *, exclude_user_id: str | None = None
 ) -> dict[str, Any]:

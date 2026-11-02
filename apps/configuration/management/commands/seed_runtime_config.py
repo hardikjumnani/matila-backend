@@ -83,6 +83,14 @@ APP_CONFIG_SEED: dict[str, tuple[Any, str]] = {
         60,
         "Minutes before expiry to warn the client.",
     ),
+    AppConfigKey.CHAT_PUSH_COOLDOWN_SECONDS: (
+        45,
+        "Per-(chat, recipient) cooldown for new-message pushes (seconds).",
+    ),
+    AppConfigKey.CHAT_REACTION_PUSH_COOLDOWN_SECONDS: (
+        120,
+        "Per-(chat, recipient) cooldown for reaction pushes (seconds).",
+    ),
     AppConfigKey.MINIMUM_SUPPORTED_VERSION: ("1.0.0", "Minimum supported client version."),
     AppConfigKey.LATEST_VERSION: ("1.0.0", "Latest available client version."),
     AppConfigKey.SUPPORT_EMAIL: ("support@matila.in", "Support contact email."),
@@ -127,6 +135,14 @@ FEATURE_FLAG_SEED: dict[str, tuple[bool, str]] = {
     FeatureFlagKey.VEIL_MEETING_WINDOW_ENFORCE: (
         True,
         "Enforce the gated cross-message meeting/location block (OFF = shadow log).",
+    ),
+    FeatureFlagKey.CHAT_PUSH_ENABLED: (
+        True,
+        "Phone push on new chat message / reaction (master kill-switch).",
+    ),
+    FeatureFlagKey.CHAT_REACTION_PUSH_ENABLED: (
+        True,
+        "Phone push on reactions specifically (silence separately from messages).",
     ),
 }
 

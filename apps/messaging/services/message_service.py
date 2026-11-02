@@ -47,6 +47,7 @@ class MessageService:
         veil_service=None,
         muffle_service=None,
         suspicion_service=None,
+        push_service=None,
     ) -> None:
         if chat_service is None:
             from apps.chats.services.chat_service import ChatService
@@ -74,12 +75,17 @@ class MessageService:
             from apps.privacy.services.suspicion_service import SuspicionService
 
             suspicion_service = SuspicionService()
+        if push_service is None:
+            from apps.notifications.services.chat_push_service import ChatPushService
+
+            push_service = ChatPushService()
         self._chats = chat_service
         self._storage = storage_service
         self._config = configuration_service
         self._veil = veil_service
         self._muffle = muffle_service
         self._suspicion = suspicion_service
+        self._push = push_service
 
     # -- Queries ------------------------------------------------------------
 
@@ -155,6 +161,7 @@ class MessageService:
         )
         self._chats.record_new_message(chat, sent_at=message.created_at)
         self._broadcast_new_message(message)
+        self._push.notify_new_message(message)
         return ServiceResult.ok(message)
 
     def send_image(
@@ -202,6 +209,7 @@ class MessageService:
         )
         self._chats.record_new_message(chat, sent_at=message.created_at)
         self._broadcast_new_message(message)
+        self._push.notify_new_message(message)
         return ServiceResult.ok(message)
 
     def create_system_message(
@@ -353,6 +361,7 @@ class MessageService:
                 "emoji": emoji,
             },
         )
+        self._push.notify_reaction(message, user, emoji)
         return ServiceResult.ok(message)
 
     def remove_reaction(

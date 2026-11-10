@@ -111,10 +111,10 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     # FINAL store coin packs (paise). price_paise is charged; original_price_paise
     # drives the struck-through cut. sku must match the Google Play managed-product id.
     AppConfigKey.COIN_PACKS: [
-        {"sku": "coin_pack_10", "coins": 10, "price_paise": 5900, "original_price_paise": 7000},
-        {"sku": "coin_pack_30", "coins": 30, "price_paise": 14900, "original_price_paise": 21000},
-        {"sku": "coin_pack_50", "coins": 50, "price_paise": 22400, "original_price_paise": 35000},
-        {"sku": "coin_pack_100", "coins": 100, "price_paise": 42900, "original_price_paise": 70000},
+        {"sku": "coins_10", "coins": 10, "price_paise": 5900, "original_price_paise": 7000},
+        {"sku": "coins_30", "coins": 30, "price_paise": 14900, "original_price_paise": 21000},
+        {"sku": "coins_50", "coins": 50, "price_paise": 22400, "original_price_paise": 35000},
+        {"sku": "coins_100", "coins": 100, "price_paise": 42900, "original_price_paise": 70000},
     ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.

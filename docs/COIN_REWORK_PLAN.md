@@ -20,7 +20,7 @@ Direct cash prices (per user), NEW values:
 - Extend: ₹50 (5000)
 - Safe reveal: ₹50 man (5000) / ₹100 woman (10000)
 
-Coin packs (store), SKUs `coin_pack_10/30/50/100`:
+Coin packs (store), SKUs `coins_10/30/50/100`:
 - 10 coins: ₹59 (5900), cut ₹70 (7000)
 - 30 coins: ₹149 (14900), cut ₹210 (21000)
 - 50 coins: ₹224 (22400), cut ₹350 (35000)
@@ -77,7 +77,7 @@ stay available per action.
 - New `AppConfigKey`s: `COIN_COST_REVEAL`, `COIN_COST_SAFE_REVEAL_MALE`,
   `COIN_COST_SAFE_REVEAL_FEMALE`, `COIN_COST_EXTEND`.
 - Replace `STANDARD_REVEAL_BUNDLES` -> `COIN_PACKS` (list of
-  `{sku, coins, price_paise, original_price_paise}`), SKUs `coin_pack_10/30/50/100`.
+  `{sku, coins, price_paise, original_price_paise}`), SKUs `coins_10/30/50/100`.
 - Update direct-cash defaults: `REVEAL_PRICE_PAISE=7000`, `CHAT_EXTENSION_PRICE_PAISE=5000`,
   `SAFE_REVEAL_MALE_PRICE_PAISE=5000`, `SAFE_REVEAL_FEMALE_PRICE_PAISE=10000`.
 - `ConfigurationService`: add `get_coin_cost(purpose, gender)`, `get_coin_packs()`,
@@ -102,7 +102,7 @@ stay available per action.
   - `_resolve_amount` returns the new cash prices.
 - Store: `purchase_bundle` -> `purchase_coin_pack`: credits the unified coin
   (`amount = pack.coins`, no coin_type), Payment `purpose=CREDIT_PURCHASE`,
-  `metadata={product_id, coins}`. Map `coin_pack_*` SKUs -> `CREDIT_PURCHASE` in
+  `metadata={product_id, coins}`. Map `coins_*` SKUs -> `CREDIT_PURCHASE` in
   `payments/constants.py`.
 - `PAYMENTS_DEV_BYPASS` token-skip and the `record_payment` wiring are unchanged.
 

@@ -41,7 +41,7 @@ class AdminCoinLedgerApiTests(TestCase):
             purpose=PaymentPurpose.CREDIT_PURCHASE,
             amount_in_paise=5900,
             status=PaymentStatus.SUCCESS,
-            metadata={"product_id": "coin_pack_10", "coins": 10},
+            metadata={"product_id": "coins_10", "coins": 10},
         )
         credits.credit(
             user=self.target, amount=10,

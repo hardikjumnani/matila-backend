@@ -72,7 +72,7 @@ class PaymentApiTests(TestCase):
         with mock.patch(_VERIFY_PLAY, side_effect=_play_stub):
             resp = _client(self.boy).post(
                 "/api/v1/store/purchase",
-                {"product_id": "coin_pack_50", "purchase_token": "tok1"},
+                {"product_id": "coins_50", "purchase_token": "tok1"},
                 format="json",
             )
         self.assertEqual(resp.status_code, 201)

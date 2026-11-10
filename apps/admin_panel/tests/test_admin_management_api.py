@@ -223,7 +223,7 @@ class AdminConfigManagementTests(TestCase):
 
     def test_coin_packs_rejects_sku_rename(self) -> None:
         packs = self._default_packs()
-        packs[0]["sku"] = "coin_pack_999"
+        packs[0]["sku"] = "coins_999"
         self.assertEqual(self._put_config("coin_packs", packs).status_code, 400)
 
     def test_coin_packs_rejects_removed_pack(self) -> None:

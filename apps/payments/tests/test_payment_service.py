@@ -126,7 +126,7 @@ class PaymentServiceTests(TestCase):
 
     def test_purchase_bundle_grants_coins(self) -> None:
         result = self.service.purchase_bundle(
-            user=self.boy, product_id="coin_pack_30",
+            user=self.boy, product_id="coins_30",
             purchase_token="tok_" + uuid.uuid4().hex,
         )
         self.assertTrue(result.success)
@@ -136,10 +136,10 @@ class PaymentServiceTests(TestCase):
     def test_purchase_bundle_idempotent_on_token(self) -> None:
         token = "tok_" + uuid.uuid4().hex
         self.service.purchase_bundle(
-            user=self.boy, product_id="coin_pack_50", purchase_token=token
+            user=self.boy, product_id="coins_50", purchase_token=token
         )
         self.service.purchase_bundle(
-            user=self.boy, product_id="coin_pack_50", purchase_token=token
+            user=self.boy, product_id="coins_50", purchase_token=token
         )
         self.assertEqual(self.credits.get_balances(self.boy)["coins"], 50)
 

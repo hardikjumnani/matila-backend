@@ -126,7 +126,7 @@ Cursor-paginated (`?limit=`, `?cursor=`), ordered `-created_at`. Each row:
 ```
 
 `label` is a ready-to-show line so the FE does not re-derive it, e.g.:
-- BUNDLE_PURCHASE: "Bought 10 coins (coin_pack_10, Rs 59)"
+- BUNDLE_PURCHASE: "Bought 10 coins (coins_10, Rs 59)"
 - ACTION_CONSUME + SAFE_REVEAL: "Spent 8 coins on safe reveal"
 - CANCELLATION_CREDIT: "Refunded 10 coins (reveal cancelled)"
 - ADMIN_ADJUST: "Admin added 5 coins (note: ...)"

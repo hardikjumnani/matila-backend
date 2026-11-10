@@ -126,7 +126,7 @@ later cleanup.
 
 So the FE does not re-implement "which pack covers this action," the catalog
 could add per action a derived `topup` hint, e.g.
-`{coins: 10, covering_pack_sku: "coin_pack_10", covering_price_paise: 5900}`.
+`{coins: 10, covering_pack_sku: "coins_10", covering_price_paise: 5900}`.
 Pure derivation from `COIN_COST_*` + `COIN_PACKS`; optional, FE can compute it.
 
 ### BE-4. Tests
@@ -184,10 +184,10 @@ cost maps to a single pack. It does not, everywhere:
 
 | Action | Coin cost | Smallest covering pack | Price shown | Leftover coins |
 |---|---|---|---|---|
-| Reveal | 10 | coin_pack_10 | Rs 59 | 0 (clean) |
-| Safe reveal (male) | 8 | coin_pack_10 | Rs 59 | 2 |
-| Extend | 6 | coin_pack_10 | Rs 59 | 4 |
-| Safe reveal (female) | 16 | coin_pack_30 | Rs 149 | 14 |
+| Reveal | 10 | coins_10 | Rs 59 | 0 (clean) |
+| Safe reveal (male) | 8 | coins_10 | Rs 59 | 2 |
+| Extend | 6 | coins_10 | Rs 59 | 4 |
+| Safe reveal (female) | 16 | coins_30 | Rs 149 | 14 |
 
 So female safe reveal would read Rs 149 (vs the old direct Rs 100) and leave 14
 coins. Reveal is the only perfectly clean case. Options in decision 2.

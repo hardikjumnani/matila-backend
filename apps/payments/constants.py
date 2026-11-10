@@ -7,7 +7,7 @@ mapping and resolves the ledger amount from config.
 
 Two tiers: a user either spends unified coins on an action, or buys the action
 directly at its cash price via its direct SKU. Coins are bought via the
-``coin_pack_*`` store SKUs (CREDIT_PURCHASE).
+``coins_*`` store SKUs (CREDIT_PURCHASE).
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from apps.payments.enums import PaymentPurpose
 
 PLAY_PRODUCT_TO_PURPOSE: dict[str, str] = {
     # Store coin packs → grant unified coins.
-    "coin_pack_10": PaymentPurpose.CREDIT_PURCHASE,
-    "coin_pack_30": PaymentPurpose.CREDIT_PURCHASE,
-    "coin_pack_50": PaymentPurpose.CREDIT_PURCHASE,
-    "coin_pack_100": PaymentPurpose.CREDIT_PURCHASE,
+    "coins_10": PaymentPurpose.CREDIT_PURCHASE,
+    "coins_30": PaymentPurpose.CREDIT_PURCHASE,
+    "coins_50": PaymentPurpose.CREDIT_PURCHASE,
+    "coins_100": PaymentPurpose.CREDIT_PURCHASE,
     # Direct-cash per-action SKUs.
     "reveal": PaymentPurpose.REVEAL,
     "safe_reveal_female": PaymentPurpose.SAFE_REVEAL,

@@ -60,6 +60,7 @@ class ChatMessagesView(ListAPIView):
                 if data.get("reply_to_message_id")
                 else None
             ),
+            client_message_id=data.get("client_message_id", ""),
         )
         if result.failed:
             return service_failure_response(result)
@@ -94,6 +95,7 @@ class ChatImageMessageView(APIView):
                 if data.get("reply_to_message_id")
                 else None
             ),
+            client_message_id=data.get("client_message_id", ""),
         )
         if result.failed:
             return service_failure_response(result)

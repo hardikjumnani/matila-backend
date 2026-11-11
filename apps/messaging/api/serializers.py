@@ -69,6 +69,11 @@ class SendTextMessageSerializer(serializers.Serializer):
 
     content = serializers.CharField(allow_blank=False, trim_whitespace=True)
     reply_to_message_id = serializers.UUIDField(required=False, allow_null=True)
+    # Client-minted idempotency key: a retried send reusing it is deduped
+    # server-side (no duplicate row/broadcast). Optional and backward-compatible.
+    client_message_id = serializers.CharField(
+        required=False, allow_blank=True, max_length=128, default=""
+    )
 
 
 class SetReactionSerializer(serializers.Serializer):
@@ -87,3 +92,7 @@ class SendImageMessageSerializer(ImageUploadSerializer):
         default=MediaVisibility.NORMAL,
     )
     reply_to_message_id = serializers.UUIDField(required=False, allow_null=True)
+    # Idempotency key as a multipart form field (same semantics as the text send).
+    client_message_id = serializers.CharField(
+        required=False, allow_blank=True, max_length=128, default=""
+    )

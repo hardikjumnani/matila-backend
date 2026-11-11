@@ -62,6 +62,12 @@ class Message(UUIDModel):
 
     metadata = models.JSONField(default=dict, blank=True)
 
+    # Client-minted idempotency key for at-least-once send dedup. Device-unique
+    # only (format "local_<micros>_<seq>"), so uniqueness is scoped per
+    # (chat, sender). Empty for SYSTEM messages and any send without a key; the
+    # unique constraint below is partial so those rows are exempt.
+    client_message_id = models.CharField(max_length=128, blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
@@ -69,6 +75,16 @@ class Message(UUIDModel):
     class Meta:
         db_table = "messages"
         ordering = ["created_at"]
+        constraints = [
+            # Idempotent sends: a retried POST/WS send reusing the same client id
+            # must not create a second row. Partial so empty keys (SYSTEM, legacy,
+            # keyless sends) never collide.
+            models.UniqueConstraint(
+                fields=["chat", "sender", "client_message_id"],
+                condition=~models.Q(client_message_id=""),
+                name="uniq_client_msg_per_sender_chat",
+            ),
+        ]
         indexes = [
             # Message list pagination within a chat, chronological.
             models.Index(

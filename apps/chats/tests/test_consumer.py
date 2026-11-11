@@ -100,6 +100,27 @@ class ChatConsumerTests(TransactionTestCase):
         await comm_a.disconnect()
         await comm_b.disconnect()
 
+    async def test_message_send_dedups_on_resend(self) -> None:
+        from apps.messaging.models import Message
+
+        comm_a, _, _ = await self._connect(self.a)
+        payload = {
+            "event": "message.send",
+            "payload": {"client_message_id": "resend_1", "content": "hi"},
+        }
+        await comm_a.send_json_to(payload)
+        ack1 = await self._await_event(comm_a, "message.ack")
+        await comm_a.send_json_to(payload)
+        ack2 = await self._await_event(comm_a, "message.ack")
+
+        # A resend returns the same server id; only one row persists.
+        self.assertEqual(ack1["payload"]["message_id"], ack2["payload"]["message_id"])
+        count = await database_sync_to_async(
+            Message.objects.filter(chat=self.chat, sender=self.a).count
+        )()
+        self.assertEqual(count, 1)
+        await comm_a.disconnect()
+
     async def test_read_only_chat_rejects_send(self) -> None:
         await database_sync_to_async(ChatService().end_chat)(
             str(self.chat.id), reason=EndReason.USER_EXIT

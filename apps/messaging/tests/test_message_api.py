@@ -106,6 +106,41 @@ class MessageApiTests(TestCase):
             again = _client(self.b).post(f"/api/v1/messages/{message_id}/view")
         self.assertEqual(again.status_code, 410)
 
+    def test_text_send_dedups_on_client_message_id(self) -> None:
+        body = {"content": "hello", "client_message_id": "local_9_0"}
+        first = self.client.post(self._messages_url(), body, format="json")
+        second = self.client.post(self._messages_url(), body, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        # Same logical message returned both times; history has exactly one.
+        self.assertEqual(first.json()["data"]["id"], second.json()["data"]["id"])
+        items = self.client.get(self._messages_url()).json()["data"]["items"]
+        self.assertEqual(len(items), 1)
+
+    def test_image_send_dedups_on_client_message_id_form_field(self) -> None:
+        with mock.patch(_UPLOAD, side_effect=lambda f, k, content_type=None: k) as up:
+            first = self.client.post(
+                self._messages_url() + "/image",
+                {
+                    "file": SimpleUploadedFile("p.jpg", b"d", content_type="image/jpeg"),
+                    "client_message_id": "img_9",
+                },
+                format="multipart",
+            )
+            second = self.client.post(
+                self._messages_url() + "/image",
+                {
+                    "file": SimpleUploadedFile("p.jpg", b"d", content_type="image/jpeg"),
+                    "client_message_id": "img_9",
+                },
+                format="multipart",
+            )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.json()["data"]["id"], second.json()["data"]["id"])
+        # The retry never re-uploaded.
+        self.assertEqual(up.call_count, 1)
+
     def test_delete_own_message(self) -> None:
         send = self.client.post(
             self._messages_url(), {"content": "mine"}, format="json"

@@ -98,6 +98,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         result = await database_sync_to_async(self._persist_text)(
             content=payload.get("content", ""),
             reply_to_message_id=payload.get("reply_to_message_id"),
+            client_message_id=client_message_id,
         )
         if result.failed:
             await self._send_error(result.error_code, result.error_message)
@@ -231,7 +232,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     # -- Synchronous DB work (run in a thread) ------------------------------
 
-    def _persist_text(self, *, content: str, reply_to_message_id):
+    def _persist_text(self, *, content: str, reply_to_message_id, client_message_id=None):
         return MessageService().send_text(
             chat_id=self.chat_id,
             sender=self.user,
@@ -239,6 +240,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             reply_to_message_id=(
                 str(reply_to_message_id) if reply_to_message_id else None
             ),
+            client_message_id=client_message_id or "",
         )
 
     def _mark_read(self, last_read_message_id: str):

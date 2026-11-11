@@ -17,7 +17,7 @@ import logging
 from datetime import timedelta
 from typing import BinaryIO
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.chats.enums import ChatPhase
@@ -96,6 +96,21 @@ class MessageService:
         """Messages of a chat in chronological order (Step 6 paginates)."""
         return Message.objects.filter(chat=chat).order_by("created_at")
 
+    def _find_by_client_message_id(
+        self, *, chat_id: str, sender: User, client_message_id: str
+    ) -> Message | None:
+        """Existing message for an idempotency key, or None.
+
+        Scoped per (chat, sender) because the key is only device-unique. Not
+        filtered on ``is_deleted`` so a retry of a since-deleted message returns
+        that same row rather than creating a twin.
+        """
+        if not client_message_id:
+            return None
+        return Message.objects.filter(
+            chat_id=chat_id, sender=sender, client_message_id=client_message_id
+        ).first()
+
     # -- Sending ------------------------------------------------------------
 
     def send_text(
@@ -105,7 +120,18 @@ class MessageService:
         sender: User,
         content: str,
         reply_to_message_id: str | None = None,
+        client_message_id: str = "",
     ) -> ServiceResult[Message]:
+        # Idempotent send: a retried POST/WS send reusing the same client id
+        # returns the original message without a second row/broadcast/push. Done
+        # before the writable check so a retry after the chat closed still
+        # returns the already-sent message instead of a read-only error.
+        existing = self._find_by_client_message_id(
+            chat_id=chat_id, sender=sender, client_message_id=client_message_id
+        )
+        if existing is not None:
+            return ServiceResult.ok(existing)
+
         chat, error = self._resolve_writable_chat(chat_id, sender)
         if error is not None:
             return error
@@ -152,13 +178,25 @@ class MessageService:
                     "INVALID_REPLY_TARGET", "The message being replied to is invalid."
                 )
 
-        message = Message.objects.create(
-            chat=chat,
-            sender=sender,
-            message_type=MessageType.TEXT,
-            text_content=content,
-            reply_to_message=reply,
-        )
+        try:
+            with transaction.atomic():
+                message = Message.objects.create(
+                    chat=chat,
+                    sender=sender,
+                    message_type=MessageType.TEXT,
+                    text_content=content,
+                    reply_to_message=reply,
+                    client_message_id=client_message_id,
+                )
+        except IntegrityError:
+            # True concurrent double-send (both missed the pre-lookup): the unique
+            # constraint rejected the loser. Return the row the winner created.
+            existing = self._find_by_client_message_id(
+                chat_id=chat_id, sender=sender, client_message_id=client_message_id
+            )
+            if existing is not None:
+                return ServiceResult.ok(existing)
+            raise
         self._chats.record_new_message(chat, sent_at=message.created_at)
         self._broadcast_new_message(message)
         self._push.notify_new_message(message)
@@ -174,7 +212,16 @@ class MessageService:
         content_type: str,
         visibility: MediaVisibility | str = MediaVisibility.NORMAL,
         reply_to_message_id: str | None = None,
+        client_message_id: str = "",
     ) -> ServiceResult[Message]:
+        # Idempotent send: return the original on a retry before doing any work,
+        # so a lost-ack retry never re-uploads a blob or creates a second row.
+        existing = self._find_by_client_message_id(
+            chat_id=chat_id, sender=sender, client_message_id=client_message_id
+        )
+        if existing is not None:
+            return ServiceResult.ok(existing)
+
         if not self._config.is_feature_enabled(FeatureFlagKey.IMAGE_MESSAGES_ENABLED):
             return ServiceResult.fail(
                 "FORBIDDEN", "Image messages are currently disabled."
@@ -197,16 +244,34 @@ class MessageService:
         key = self._storage.build_key(_IMAGE_KEY_PREFIX, filename)
         self._storage.upload_fileobj(fileobj, key, content_type=content_type)
 
-        message = Message.objects.create(
-            chat=chat,
-            sender=sender,
-            message_type=MessageType.IMAGE,
-            media_url=key,
-            media_visibility=visibility,
-            media_status=MediaStatus.AVAILABLE,
-            media_expires_at=timezone.now() + timedelta(days=MEDIA_RETENTION_DAYS),
-            reply_to_message=reply,
-        )
+        try:
+            with transaction.atomic():
+                message = Message.objects.create(
+                    chat=chat,
+                    sender=sender,
+                    message_type=MessageType.IMAGE,
+                    media_url=key,
+                    media_visibility=visibility,
+                    media_status=MediaStatus.AVAILABLE,
+                    media_expires_at=timezone.now()
+                    + timedelta(days=MEDIA_RETENTION_DAYS),
+                    reply_to_message=reply,
+                    client_message_id=client_message_id,
+                )
+        except IntegrityError:
+            # True concurrent double-send: another request won the unique key. The
+            # blob we just uploaded is now orphaned (it isn't attached to the
+            # winning row), so best-effort delete it, then return the winner.
+            existing = self._find_by_client_message_id(
+                chat_id=chat_id, sender=sender, client_message_id=client_message_id
+            )
+            if existing is not None:
+                try:
+                    self._storage.delete_object(key)
+                except Exception:  # noqa: BLE001 — cleanup only; the send succeeded.
+                    logger.warning("orphan image blob delete failed for key %s", key)
+                return ServiceResult.ok(existing)
+            raise
         self._chats.record_new_message(chat, sent_at=message.created_at)
         self._broadcast_new_message(message)
         self._push.notify_new_message(message)

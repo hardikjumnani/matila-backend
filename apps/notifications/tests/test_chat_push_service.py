@@ -5,10 +5,14 @@ from __future__ import annotations
 import uuid
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase
 
 from apps.chats.aliases import anonymous_alias
+from apps.chats.enums import ChatPhase, ChatStatus
 from apps.chats.models import Chat, ChatParticipant
+from apps.configuration.constants import FeatureFlagKey
+from apps.configuration.models import FeatureFlag
 from apps.messaging.enums import MessageType
 from apps.messaging.models import Message
 from apps.notifications.services.chat_push_service import ChatPushService
@@ -27,6 +31,7 @@ def _user(name="") -> User:
 
 class ChatPushServiceTests(TestCase):
     def setUp(self) -> None:
+        cache.clear()
         self.a = _user("Hardik Jumnani")   # sender / author
         self.b = _user("Isha Roy")         # recipient
         self.chat = Chat.objects.create()
@@ -87,3 +92,83 @@ class ChatPushServiceTests(TestCase):
         with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
             self.svc.notify_reaction(message, self.a, "\U0001F602")  # A reacts to own
         task.delay.assert_not_called()
+
+    # -- Post-reveal real name ---------------------------------------------
+
+    def _reveal(self, status=ChatStatus.REVEALED) -> None:
+        self.chat.current_phase = ChatPhase.REVEALED
+        self.chat.status = status
+        self.chat.save(update_fields=["current_phase", "status"])
+
+    def _enqueue_args(self, call):
+        return dict(
+            zip(
+                ("recipient_id", "kind", "chat_id", "title", "body", "data"),
+                call.args,
+            )
+        )
+
+    def test_revealed_chat_message_shows_real_name(self):
+        self._reveal()
+        message = self._msg(self.a)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_new_message(message)
+        a = self._enqueue_args(task.delay.call_args)
+        self.assertEqual(a["title"], "Hardik Jumnani")
+        self.assertEqual(a["data"]["display_name"], "Hardik Jumnani")
+        # alias still present for backward-compat.
+        self.assertEqual(
+            a["data"]["alias"], anonymous_alias(str(self.chat.id), str(self.a.id))
+        )
+
+    def test_revealed_reaction_shows_real_name(self):
+        self._reveal()
+        message = self._msg(self.a)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_reaction(message, self.b, "\U0001F602")  # B reacts
+        a = self._enqueue_args(task.delay.call_args)
+        self.assertEqual(a["title"], "Isha Roy")
+        self.assertEqual(a["data"]["display_name"], "Isha Roy")
+
+    def test_ended_after_reveal_still_shows_real_name(self):
+        # current_phase stays REVEALED after the chat ends/expires.
+        self._reveal(status=ChatStatus.ENDED)
+        message = self._msg(self.a)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_new_message(message)
+        self.assertEqual(self._enqueue_args(task.delay.call_args)["title"], "Hardik Jumnani")
+
+    def test_flag_off_keeps_alias_even_when_revealed(self):
+        self._reveal()
+        FeatureFlag.objects.create(
+            key=FeatureFlagKey.REVEAL_REAL_NAME_PUSH_ENABLED, value=False
+        )
+        cache.clear()
+        message = self._msg(self.a)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_new_message(message)
+        a = self._enqueue_args(task.delay.call_args)
+        self.assertEqual(a["title"], anonymous_alias(str(self.chat.id), str(self.a.id)))
+        self.assertNotIn("display_name", a["data"])
+
+    def test_revealed_blank_name_falls_back_to_alias(self):
+        nameless = _user("")  # no full_name
+        ChatParticipant.objects.create(chat=self.chat, user=nameless)
+        self._reveal()
+        message = self._msg(nameless)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_new_message(message)
+        a = self._enqueue_args(task.delay.call_args)
+        self.assertEqual(
+            a["title"], anonymous_alias(str(self.chat.id), str(nameless.id))
+        )
+        self.assertNotIn("display_name", a["data"])
+
+    def test_anonymous_chat_still_aliased(self):
+        # No reveal: default ANONYMOUS phase keeps the alias and omits display_name.
+        message = self._msg(self.a)
+        with mock.patch(_TASK) as task, self.captureOnCommitCallbacks(execute=True):
+            self.svc.notify_new_message(message)
+        a = self._enqueue_args(task.delay.call_args)
+        self.assertEqual(a["title"], anonymous_alias(str(self.chat.id), str(self.a.id)))
+        self.assertNotIn("display_name", a["data"])

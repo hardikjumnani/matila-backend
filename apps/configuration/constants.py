@@ -83,6 +83,9 @@ class FeatureFlagKey:
     # Chat push notifications (new message / reaction). Master + reaction kill-switch.
     CHAT_PUSH_ENABLED = "chat_push_enabled"
     CHAT_REACTION_PUSH_ENABLED = "chat_reaction_push_enabled"
+    # After a mutual reveal, show the sender's real name (not the alias) in chat
+    # pushes. ON by default; runtime kill-switch (lock-screen privacy trade-off).
+    REVEAL_REAL_NAME_PUSH_ENABLED = "reveal_real_name_push_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
     # One-time first-reveal coin discount (coin_cost_reveal_first). ON by default.
@@ -188,6 +191,9 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     # Chat push notifications: ON by default; reactions separately killable.
     FeatureFlagKey.CHAT_PUSH_ENABLED: True,
     FeatureFlagKey.CHAT_REACTION_PUSH_ENABLED: True,
+    # Real name (not alias) in pushes once a chat is mutually revealed. ON by
+    # default; flip off to keep the discreet alias on the lock screen.
+    FeatureFlagKey.REVEAL_REAL_NAME_PUSH_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
     # One-time first-reveal coin discount. ON by default; runtime kill-switch.
     FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED: True,

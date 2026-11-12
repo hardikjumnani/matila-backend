@@ -47,6 +47,9 @@ class AppConfigKey:
     MATCHMAKING_TIMEOUT_SECONDS = "matchmaking_timeout_seconds"
     GESTURE_POOL = "gesture_pool"
     CHAT_EXPIRY_WARNING_MINUTES = "chat_expiry_warning_minutes"
+    # Minutes-before-expiry at which to push a one-time reminder to both people in
+    # an anonymous chat. A list, runtime-editable. See send_expiry_reminders.
+    CHAT_EXPIRY_REMINDER_MINUTES = "chat_expiry_reminder_minutes"
     # Emoji set for message reactions (runtime-editable, like the gesture pool).
     REACTION_EMOJIS = "reaction_emojis"
     # Chat push notifications: per-(chat, recipient) cooldown to coalesce rapid
@@ -86,6 +89,8 @@ class FeatureFlagKey:
     # After a mutual reveal, show the sender's real name (not the alias) in chat
     # pushes. ON by default; runtime kill-switch (lock-screen privacy trade-off).
     REVEAL_REAL_NAME_PUSH_ENABLED = "reveal_real_name_push_enabled"
+    # One-time pre-expiry reminders (T-60 / T-30) for anonymous chats. Kill-switch.
+    CHAT_EXPIRY_REMINDER_ENABLED = "chat_expiry_reminder_enabled"
     # Second-hand Veil suspicion engine (non-blocking). Seeded OFF; tune then on.
     SUSPICION_ENABLED = "suspicion_enabled"
     # One-time first-reveal coin discount (coin_cost_reveal_first). ON by default.
@@ -121,6 +126,9 @@ APP_CONFIG_DEFAULTS: dict[str, Any] = {
     ],
     AppConfigKey.MATCHMAKING_TIMEOUT_SECONDS: 300,  # CHOSEN.
     AppConfigKey.CHAT_EXPIRY_WARNING_MINUTES: 60,  # CHOSEN.
+    # CHOSEN: push a one-time "ending soon" reminder at 1 hour and at 30 minutes
+    # before an anonymous chat expires. Descending; runtime-editable.
+    AppConfigKey.CHAT_EXPIRY_REMINDER_MINUTES: [60, 30],
     # CHOSEN: message-reaction emoji set (runtime-editable; the FE bundles the
     # same default and falls back to it offline). Served via GET /config.
     AppConfigKey.REACTION_EMOJIS: ["❤️", "\U0001F602", "\U0001F62E",
@@ -194,6 +202,8 @@ FEATURE_FLAG_DEFAULTS: dict[str, bool] = {
     # Real name (not alias) in pushes once a chat is mutually revealed. ON by
     # default; flip off to keep the discreet alias on the lock screen.
     FeatureFlagKey.REVEAL_REAL_NAME_PUSH_ENABLED: True,
+    # Pre-expiry "ending soon" reminders for anonymous chats. ON by default.
+    FeatureFlagKey.CHAT_EXPIRY_REMINDER_ENABLED: True,
     FeatureFlagKey.SUSPICION_ENABLED: False,  # OFF by default; tune then enable.
     # One-time first-reveal coin discount. ON by default; runtime kill-switch.
     FeatureFlagKey.FIRST_REVEAL_DISCOUNT_ENABLED: True,

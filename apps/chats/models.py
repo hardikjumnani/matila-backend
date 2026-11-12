@@ -59,6 +59,12 @@ class Chat(UUIDModel):
     message_count = models.PositiveIntegerField(default=0)
     anonymous_chat_extension_count = models.PositiveIntegerField(default=0)
 
+    # Pre-expiry reminder bookkeeping. Shape: {"for": "<current_phase_ends_at
+    # ISO>", "sent": [60, 30]}. Tying the sent thresholds to the exact deadline
+    # means an extension (new current_phase_ends_at) auto-invalidates the state
+    # and re-arms both reminders. Managed by the send_expiry_reminders task.
+    expiry_reminder_state = models.JSONField(default=dict, blank=True)
+
     last_message_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)

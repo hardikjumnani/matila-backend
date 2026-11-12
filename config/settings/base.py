@@ -402,6 +402,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.reveal.tasks.auto_exit_stale_decisions",
         "schedule": EXPIRE_CHATS_INTERVAL_SECONDS,  # same cadence as expiry
     },
+    "send-expiry-reminders": {
+        "task": "apps.chats.tasks.send_expiry_reminders",
+        "schedule": EXPIRE_CHATS_INTERVAL_SECONDS,  # same cadence as expiry
+    },
     "cleanup-expired-media": {
         "task": "apps.messaging.tasks.cleanup_expired_media",
         "schedule": crontab(hour=2, minute=0),  # daily at 02:00 UTC

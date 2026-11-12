@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -105,15 +106,35 @@ class Command(BaseCommand):
                 f"--confirm {CONFIRM_TOKEN} (or --dry-run to preview)."
             )
 
+        # Preserve admin login identities (ADMIN_EMAILS) so a wipe never locks
+        # admins out. Admins sign in with non-college emails that bootstrap can't
+        # recreate, so their user row must survive. Only the row is kept; their
+        # transactional data is wiped like everyone else's.
+        admin_emails = {e.strip().lower() for e in settings.ADMIN_EMAILS if e.strip()}
+        preserved_ids = [
+            uid
+            for uid, email in User.objects.values_list("id", "college_email")
+            if (email or "").lower() in admin_emails
+        ]
+
         keep_before = {m.__name__: m.objects.count() for m in KEEP_MODELS}
 
         self.stdout.write("Rows to purge:")
         total = 0
         for model in PURGE_ORDER:
             count = model.objects.count()
+            if model is User:
+                count -= len(preserved_ids)
             total += count
             self.stdout.write(f"  {model._meta.db_table:24s} {count}")
         self.stdout.write(f"  {'TOTAL':24s} {total}")
+        if preserved_ids:
+            self.stdout.write(
+                f"Preserving {len(preserved_ids)} admin account(s): "
+                + ", ".join(sorted(admin_emails))
+            )
+        else:
+            self.stdout.write("Preserving 0 admin accounts.")
         self.stdout.write(
             "Keeping (must be unchanged): "
             + ", ".join(f"{k}={v}" for k, v in keep_before.items())
@@ -125,14 +146,19 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             for model in PURGE_ORDER:
-                model.objects.all().delete()
+                if model is User:
+                    User.objects.exclude(id__in=preserved_ids).delete()
+                else:
+                    model.objects.all().delete()
 
             # Verify inside the transaction so any surprise rolls everything back.
-            leftover = {
-                m._meta.db_table: m.objects.count()
-                for m in PURGE_ORDER
-                if m.objects.exists()
-            }
+            # Only the preserved admin rows may remain in `users`.
+            leftover = {}
+            for m in PURGE_ORDER:
+                remaining = m.objects.count()
+                allowed = len(preserved_ids) if m is User else 0
+                if remaining != allowed:
+                    leftover[m._meta.db_table] = remaining
             if leftover:
                 raise CommandError(f"Purge incomplete, rolling back: {leftover}")
             keep_after = {m.__name__: m.objects.count() for m in KEEP_MODELS}
@@ -144,7 +170,8 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Purge complete. All accounts and transactional data wiped; "
+                f"Purge complete. Wiped all accounts and transactional data "
+                f"(kept {len(preserved_ids)} admin login(s)); "
                 "colleges, config and pricing preserved."
             )
         )

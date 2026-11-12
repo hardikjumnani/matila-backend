@@ -6,7 +6,7 @@ import uuid
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.chats.models import Chat
 from apps.chats.services.chat_service import ChatService
@@ -67,6 +67,24 @@ class PurgeUserDataTests(TestCase):
         # updated_by was SET_NULL, not deleted with the user.
         self.assertIsNone(pricing.updated_by_id)
         self.assertIsNone(FeatureFlag.objects.get(key="x_test_flag").updated_by_id)
+
+    @override_settings(ADMIN_EMAILS=["Boss@College.edu"])
+    def test_preserves_admin_accounts(self) -> None:
+        admin = User.objects.create(
+            firebase_uid="fb_admin_" + uuid.uuid4().hex,
+            college_email="boss@college.edu",  # case-insensitive match
+            full_name="Boss",
+        )
+        self._seed()  # other users + transactional data
+        self.assertGreater(User.objects.count(), 1)
+
+        call_command("purge_user_data", confirm="WIPE")
+
+        # Only the admin login survives; everything else is gone.
+        self.assertEqual(User.objects.count(), 1)
+        self.assertTrue(User.objects.filter(id=admin.id).exists())
+        self.assertEqual(Chat.objects.count(), 0)
+        self.assertEqual(Message.objects.count(), 0)
 
     def test_dry_run_deletes_nothing(self) -> None:
         self._seed()

@@ -121,6 +121,27 @@ class ChatConsumerTests(TransactionTestCase):
         self.assertEqual(count, 1)
         await comm_a.disconnect()
 
+    async def test_sender_gets_cmid_echo_partner_does_not(self) -> None:
+        comm_a, _, _ = await self._connect(self.a)
+        comm_b, _, _ = await self._connect(self.b)
+
+        await comm_a.send_json_to(
+            {
+                "event": "message.send",
+                "payload": {"client_message_id": "t1", "content": "hi"},
+            }
+        )
+        # Partner b: plain message.new, no client_message_id.
+        new_b = await self._await_event(comm_b, "message.new")
+        self.assertEqual(new_b["payload"]["message"]["text_content"], "hi")
+        self.assertNotIn("client_message_id", new_b["payload"]["message"])
+        # Sender a: message.new echo carrying the key it sent.
+        new_a = await self._await_event(comm_a, "message.new")
+        self.assertEqual(new_a["payload"]["message"]["client_message_id"], "t1")
+
+        await comm_a.disconnect()
+        await comm_b.disconnect()
+
     async def test_read_only_chat_rejects_send(self) -> None:
         await database_sync_to_async(ChatService().end_chat)(
             str(self.chat.id), reason=EndReason.USER_EXIT

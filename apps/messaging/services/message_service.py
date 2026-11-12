@@ -482,12 +482,45 @@ class MessageService:
         Emitted here (not in the transport layer) so both REST and WebSocket
         sends deliver the message in real time exactly once, and only after the
         database transaction has committed.
+
+        Sender-scoped ``client_message_id`` echo: the sender also receives their
+        own message.new over the socket, which would otherwise race the REST 201
+        and briefly flash a duplicate of the optimistic bubble (the local echo is
+        keyed by the client id, the socket copy by the server id). So for a keyed
+        send we deliver two frames (chats are 1:1): the partner gets the plain
+        payload, and the sender's own frame carries ``message.client_message_id``
+        so the client reconciles its optimistic bubble in place. The partner frame
+        never carries the key, keeping it sender-private (per [50092]).
         """
-        payload = {"message": build_message_payload(message)}
         chat_id = str(message.chat_id)
-        transaction.on_commit(
-            lambda: broadcast_to_chat(chat_id, "message.new", payload)
-        )
+        base = build_message_payload(message)
+        cmid = message.client_message_id
+
+        if message.sender_id is None or not cmid:
+            # System message or keyless send: one plain broadcast to everyone.
+            payload = {"message": base}
+            transaction.on_commit(
+                lambda: broadcast_to_chat(chat_id, "message.new", payload)
+            )
+            return
+
+        sender_id = str(message.sender_id)
+        others = self._chats.other_participant_ids(message.chat, message.sender_id)
+        partner_id = str(others[0]) if others else None
+        plain = {"message": base}
+        echo = {"message": {**base, "client_message_id": cmid}}
+
+        def _emit() -> None:
+            # Partner(s): plain frame, no client_message_id.
+            broadcast_to_chat(chat_id, "message.new", plain, exclude_user_id=sender_id)
+            # Sender's own device(s): echo frame with the key. Excluding the
+            # partner means only the sender receives it in a 1:1 chat.
+            if partner_id is not None:
+                broadcast_to_chat(
+                    chat_id, "message.new", echo, exclude_user_id=partner_id
+                )
+
+        transaction.on_commit(_emit)
 
     def _resolve_writable_chat(
         self, chat_id: str, sender: User

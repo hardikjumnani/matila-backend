@@ -275,6 +275,51 @@ class MessageServiceTests(TestCase):
             1,
         )
 
+    # -- Sender-scoped client_message_id echo on message.new ----------------
+
+    _BCAST = "apps.messaging.services.message_service.broadcast_to_chat"
+
+    def test_keyed_send_echoes_cmid_to_sender_only(self) -> None:
+        with mock.patch(self._BCAST) as bcast, self.captureOnCommitCallbacks(
+            execute=True
+        ):
+            self.service.send_text(
+                chat_id=str(self.chat.id), sender=self.a, content="hi",
+                client_message_id="k1",
+            )
+        calls = bcast.call_args_list
+        self.assertEqual(len(calls), 2)
+        by_exclude = {c.kwargs.get("exclude_user_id"): c for c in calls}
+        # Frame excluding the partner (b) is the sender's own echo (carries key);
+        # frame excluding the sender (a) goes to the partner (no key).
+        sender_frame = by_exclude[str(self.b.id)]
+        partner_frame = by_exclude[str(self.a.id)]
+        self.assertEqual(sender_frame.args[1], "message.new")
+        self.assertEqual(sender_frame.args[2]["message"]["client_message_id"], "k1")
+        self.assertNotIn("client_message_id", partner_frame.args[2]["message"])
+
+    def test_keyless_send_is_single_plain_broadcast(self) -> None:
+        with mock.patch(self._BCAST) as bcast, self.captureOnCommitCallbacks(
+            execute=True
+        ):
+            self.service.send_text(
+                chat_id=str(self.chat.id), sender=self.a, content="hi"
+            )
+        self.assertEqual(bcast.call_count, 1)
+        call = bcast.call_args
+        self.assertIsNone(call.kwargs.get("exclude_user_id"))
+        self.assertNotIn("client_message_id", call.args[2]["message"])
+
+    def test_system_message_is_single_plain_broadcast(self) -> None:
+        with mock.patch(self._BCAST) as bcast, self.captureOnCommitCallbacks(
+            execute=True
+        ):
+            self.service.create_system_message(chat=self.chat, content="sys")
+        self.assertEqual(bcast.call_count, 1)
+        self.assertNotIn(
+            "client_message_id", bcast.call_args.args[2]["message"]
+        )
+
     def test_concurrent_race_deletes_orphan_image_blob(self) -> None:
         winner = self.service.send_image(
             chat_id=str(self.chat.id), sender=self.a, fileobj=io.BytesIO(b"x"),

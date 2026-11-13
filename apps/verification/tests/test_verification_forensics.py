@@ -85,7 +85,8 @@ class VerificationForensicsIntegrationTests(TestCase):
         )
         draft = VerificationRequest.objects.get(user=user)
         self.assertTrue(draft.college_id_forensics.get("signals"))
-        # College-id upload must not populate the selfie hashes.
+        # College-id upload populates the college hashes, not the selfie ones.
+        self.assertTrue(draft.college_id_sha256)
         self.assertEqual(draft.selfie_sha256, "")
 
     def test_duplicate_selfie_detected_across_users(self) -> None:

@@ -128,7 +128,7 @@ class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
         from apps.verification.services.verification_service import VerificationService
 
         report = super().get_forensics(obj)
-        duplicates = VerificationService().find_selfie_duplicates(obj)
+        duplicates = VerificationService().find_duplicates(obj)
         report["duplicates"] = duplicates
         if duplicates:
             report["overall"] = "attention"

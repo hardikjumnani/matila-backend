@@ -17,7 +17,7 @@ import secrets
 from typing import Any, BinaryIO
 
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Max
 from django.utils import timezone
 
 from apps.audit.enums import ActorType
@@ -30,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 _COLLEGE_ID_PREFIX = "verification/college-id"
 _GESTURE_SELFIE_PREFIX = "verification/gesture-selfie"
+
+# Perceptual-hash duplicate matching. A flat/near-flat image hashes to a
+# degenerate value that would "match" everything, so it is ignored for perceptual
+# matching. Hamming threshold (of 64 bits) for a near-duplicate; the scan is
+# bounded so the Python pass stays cheap at the current scale.
+_DEGENERATE_PHASHES = ("0000000000000000", "ffffffffffffffff")
+_PHASH_HAMMING_THRESHOLD = 6
+_DUP_SCAN_LIMIT = 5000
+
+
+def _hamming(a: str, b: str) -> int:
+    """Hamming distance between two hex hash strings (bit count of XOR)."""
+    try:
+        return bin(int(a, 16) ^ int(b, 16)).count("1")
+    except (ValueError, TypeError):
+        return 64
 
 
 class VerificationService:
@@ -81,40 +97,77 @@ class VerificationService:
         return VerificationRequest.objects.filter(user=user).order_by("-attempt_number")
 
     def find_selfie_duplicates(self, request: VerificationRequest) -> list[dict]:
-        """Other users whose gesture selfie matches this request's (same photo
-        reused across accounts). Exact (sha256) or perceptual (phash) equality;
-        report-only. Near-duplicate Hamming search is a later enhancement."""
-        sha = request.selfie_sha256 or ""
-        phash = request.selfie_phash or ""
-        # A flat/near-flat image yields a degenerate hash (all 0s / all fs) that
-        # would "match" every other flat image; ignore it for perceptual matching
-        # (exact sha still applies).
-        if phash in ("0000000000000000", "ffffffffffffffff"):
-            phash = ""
-        condition = Q()
-        if sha:
-            condition |= Q(selfie_sha256=sha)
-        if phash:
-            condition |= Q(selfie_phash=phash)
-        if not condition:
-            return []
-        rows = (
-            VerificationRequest.objects.exclude(user_id=request.user_id)
-            .filter(condition)
-            .values("id", "user_id", "selfie_sha256", "selfie_phash")
-            .order_by("-created_at")
+        """Other users whose gesture selfie matches this one (same photo reused)."""
+        return self._find_image_duplicates(
+            request, "selfie_sha256", "selfie_phash", "selfie"
         )
+
+    def find_college_id_duplicates(self, request: VerificationRequest) -> list[dict]:
+        """Other users whose college ID image matches this one."""
+        return self._find_image_duplicates(
+            request, "college_id_sha256", "college_id_phash", "college_id"
+        )
+
+    def find_duplicates(self, request: VerificationRequest) -> list[dict]:
+        """All cross-user image reuse for this request (selfie + college ID)."""
+        return self.find_selfie_duplicates(request) + self.find_college_id_duplicates(
+            request
+        )
+
+    def _find_image_duplicates(
+        self,
+        request: VerificationRequest,
+        sha_field: str,
+        phash_field: str,
+        image: str,
+    ) -> list[dict]:
+        """Cross-user reuse of one image: exact (sha256) plus near-duplicate
+        (perceptual-hash Hamming distance). Report-only. A degenerate flat-image
+        hash is ignored for perceptual matching (exact sha still applies). The
+        perceptual pass is a bounded Python scan, fine at the current scale."""
+        sha = getattr(request, sha_field, "") or ""
+        phash = getattr(request, phash_field, "") or ""
+        if phash in _DEGENERATE_PHASHES:
+            phash = ""
+
         matches: list[dict] = []
         seen: set[str] = set()
-        for row in rows:
-            uid = str(row["user_id"])
-            if uid in seen:
-                continue
-            seen.add(uid)
-            kind = "exact" if sha and row["selfie_sha256"] == sha else "perceptual"
-            matches.append(
-                {"user_id": uid, "attempt_id": str(row["id"]), "kind": kind}
+
+        if sha:
+            exact = (
+                VerificationRequest.objects.exclude(user_id=request.user_id)
+                .filter(**{sha_field: sha})
+                .values("id", "user_id")
+                .order_by("-created_at")
             )
+            for row in exact:
+                uid = str(row["user_id"])
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                matches.append(
+                    {"user_id": uid, "attempt_id": str(row["id"]),
+                     "image": image, "kind": "exact"}
+                )
+
+        if phash:
+            candidates = (
+                VerificationRequest.objects.exclude(user_id=request.user_id)
+                .exclude(**{phash_field: ""})
+                .exclude(**{f"{phash_field}__in": list(_DEGENERATE_PHASHES)})
+                .values("id", "user_id", phash_field)
+                .order_by("-created_at")[:_DUP_SCAN_LIMIT]
+            )
+            for row in candidates:
+                uid = str(row["user_id"])
+                if uid in seen:
+                    continue
+                if _hamming(phash, row[phash_field]) <= _PHASH_HAMMING_THRESHOLD:
+                    seen.add(uid)
+                    matches.append(
+                        {"user_id": uid, "attempt_id": str(row["id"]),
+                         "image": image, "kind": "near"}
+                    )
         return matches
 
     def has_submitted_request(self, user: User) -> bool:
@@ -319,7 +372,13 @@ class VerificationService:
             ]
         elif field == "college_id_image_url":
             draft.college_id_forensics = report
-            update_fields.append("college_id_forensics")
+            draft.college_id_sha256 = report.get("sha256", "")
+            draft.college_id_phash = report.get("phash", "")
+            update_fields += [
+                "college_id_forensics",
+                "college_id_sha256",
+                "college_id_phash",
+            ]
 
     @transaction.atomic
     def submit(self, user: User) -> ServiceResult[VerificationRequest]:

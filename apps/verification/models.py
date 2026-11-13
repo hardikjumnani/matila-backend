@@ -57,10 +57,12 @@ class VerificationRequest(TimeStampedUUIDModel):
     # on every verification (any status) alongside the image. AI_BRIDGE / EXTERNAL.
     gesture_selfie_forensics = models.JSONField(default=dict, blank=True)
     college_id_forensics = models.JSONField(default=dict, blank=True)
-    # Indexed hashes of the gesture selfie for cross-user reuse detection (the same
-    # photo farmed across accounts). sha256 = exact, phash = perceptual (near) match.
+    # Indexed hashes for cross-user reuse detection (the same photo farmed across
+    # accounts). sha256 = exact, phash = perceptual (exact + near/Hamming) match.
     selfie_sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
     selfie_phash = models.CharField(max_length=16, blank=True, default="", db_index=True)
+    college_id_sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    college_id_phash = models.CharField(max_length=16, blank=True, default="", db_index=True)
 
     class Meta:
         db_table = "verification_requests"

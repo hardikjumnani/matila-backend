@@ -111,11 +111,17 @@ class Command(BaseCommand):
         # recreate, so their user row must survive. Only the row is kept; their
         # transactional data is wiped like everyone else's.
         admin_emails = {e.strip().lower() for e in settings.ADMIN_EMAILS if e.strip()}
-        preserved_ids = [
+        preserved = {
             uid
             for uid, email in User.objects.values_list("id", "college_email")
             if (email or "").lower() in admin_emails
-        ]
+        }
+        # Also preserve isolated demo/review accounts (App Store reviewer bypass)
+        # so a pre-launch wipe never deletes the reviewer identity. Their seeded
+        # content (wallet/coins/chat) is wiped like everyone else's; re-run
+        # `provision_review_account` after the wipe to restore it. AI_BRIDGE [00079].
+        demo_ids = set(User.objects.filter(is_demo=True).values_list("id", flat=True))
+        preserved_ids = list(preserved | demo_ids)
 
         keep_before = {m.__name__: m.objects.count() for m in KEEP_MODELS}
 
@@ -130,11 +136,12 @@ class Command(BaseCommand):
         self.stdout.write(f"  {'TOTAL':24s} {total}")
         if preserved_ids:
             self.stdout.write(
-                f"Preserving {len(preserved_ids)} admin account(s): "
-                + ", ".join(sorted(admin_emails))
+                f"Preserving {len(preserved_ids)} account row(s) "
+                f"({len(preserved)} admin, {len(demo_ids)} demo): "
+                + ", ".join(sorted(admin_emails) or ["(none by email)"])
             )
         else:
-            self.stdout.write("Preserving 0 admin accounts.")
+            self.stdout.write("Preserving 0 accounts.")
         self.stdout.write(
             "Keeping (must be unchanged): "
             + ", ".join(f"{k}={v}" for k, v in keep_before.items())

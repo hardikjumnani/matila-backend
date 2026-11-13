@@ -17,6 +17,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.common.firebase import InvalidFirebaseToken, verify_id_token
@@ -90,6 +91,41 @@ class SessionView(APIView):
             },
             status=status_code,
         )
+
+
+class ReviewLoginView(APIView):
+    """POST /auth/review-login — App Store reviewer bypass (AI_BRIDGE [00079]).
+
+    Unauthenticated: the reviewer is not signed in yet. Exchanges a shared static
+    code for a Firebase custom token for the isolated demo account. Throttled, and
+    disabled entirely when ``REVIEW_LOGIN_CODE`` is unset.
+    """
+
+    authentication_classes: list = []  # The reviewer has no session yet.
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "review_login"
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._auth_service = AuthService()
+
+    @extend_schema(
+        request=None,
+        responses={200: OpenApiResponse(description="{'custom_token': '<token>'}")},
+        description=(
+            "Exchange the shared reviewer access code for a Firebase custom token "
+            "for the demo account. Returns 403 when disabled, 401 for a bad code."
+        ),
+    )
+    def post(self, request: Request) -> Response:
+        code = ""
+        if isinstance(request.data, dict):
+            code = str(request.data.get("code") or "")
+        result = self._auth_service.review_login(code)
+        if result.failed:
+            return service_failure_response(result)
+        return Response(result.data)
 
 
 class MeView(APIView):

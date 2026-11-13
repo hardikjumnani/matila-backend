@@ -88,6 +88,55 @@ def verify_id_token(token: str) -> dict[str, Any]:
         raise InvalidFirebaseToken("Firebase token verification failed.") from exc
 
 
+def create_custom_token(uid: str, developer_claims: dict[str, Any] | None = None) -> str:
+    """Mint a Firebase custom token for ``uid`` (signed offline by the service
+    account), which a client exchanges via ``signInWithCustomToken``.
+
+    Used by the App Store reviewer bypass (``/auth/review-login``) to hand an
+    isolated demo account a sign-in token without a password or email link.
+
+    Raises:
+        FirebaseNotConfigured: if Firebase credentials are not configured.
+        FirebaseError: if token creation fails.
+    """
+    if not uid:
+        raise FirebaseError("A uid is required to mint a custom token.")
+    try:
+        token = auth.create_custom_token(uid, developer_claims, app=_get_app())
+    except FirebaseNotConfigured:
+        raise
+    except Exception as exc:  # firebase_admin raises a range of signing errors.
+        logger.warning("Custom token creation failed: %s", exc)
+        raise FirebaseError("Custom token creation failed.") from exc
+    # create_custom_token returns bytes; the client needs a string.
+    return token.decode("utf-8") if isinstance(token, bytes) else token
+
+
+def ensure_auth_user(uid: str, email: str) -> None:
+    """Create or update the Firebase Auth user for a provisioned demo account so
+    that a ``signInWithCustomToken`` session carries a verified ``email`` claim
+    (the session bootstrap requires one). Idempotent.
+
+    Raises:
+        FirebaseNotConfigured: if Firebase credentials are not configured.
+        FirebaseError: if the user cannot be created/updated.
+    """
+    app = _get_app()
+    try:
+        try:
+            auth.get_user(uid, app=app)
+            auth.update_user(uid, email=email, email_verified=True, app=app)
+        except auth.UserNotFoundError:
+            auth.create_user(
+                uid=uid, email=email, email_verified=True, app=app
+            )
+    except FirebaseNotConfigured:
+        raise
+    except Exception as exc:
+        logger.warning("Ensuring Firebase auth user %s failed: %s", uid, exc)
+        raise FirebaseError("Could not provision the Firebase auth user.") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class PushResult:
     """Outcome of a multicast push, with tokens FCM reported as dead."""

@@ -13,8 +13,10 @@ WebSocket middleware translate its outcomes into transport-specific responses.
 from __future__ import annotations
 
 import logging
+import secrets
 from dataclasses import dataclass
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -272,6 +274,36 @@ class AuthService:
         user.profile_photo_url = key
         user.save(update_fields=["profile_photo_url", "updated_at"])
         return ServiceResult.ok(user)
+
+    def review_login(self, code: str) -> ServiceResult[dict]:
+        """App Store reviewer bypass: validate the shared static code and mint a
+        Firebase custom token for the isolated demo account (AI_BRIDGE [00079]).
+
+        An empty ``REVIEW_LOGIN_CODE`` setting disables the feature entirely
+        (FORBIDDEN). A missing/incorrect code is rejected (UNAUTHORIZED) with a
+        constant-time compare so the check never leaks the secret's length/prefix.
+        On success the caller returns ``{"custom_token": ...}``; the client
+        exchanges it via ``signInWithCustomToken`` and the normal session
+        bootstrap routes the demo account straight to HOME.
+        """
+        expected = (settings.REVIEW_LOGIN_CODE or "").strip()
+        if not expected:
+            return ServiceResult.fail("FORBIDDEN", "Reviewer access is not enabled.")
+        provided = (code or "").strip()
+        if not provided or not secrets.compare_digest(provided, expected):
+            return ServiceResult.fail("UNAUTHORIZED", "Access code not accepted.")
+
+        from apps.common.firebase import FirebaseError, create_custom_token
+
+        try:
+            token = create_custom_token(settings.REVIEW_DEMO_UID)
+        except FirebaseError:
+            logger.exception("Review login: failed to mint custom token")
+            return ServiceResult.fail(
+                "INTERNAL_SERVER_ERROR", "Could not create a review session."
+            )
+        logger.info("Review login: issued a demo custom token.")
+        return ServiceResult.ok({"custom_token": token})
 
     @transaction.atomic
     def bootstrap_session(

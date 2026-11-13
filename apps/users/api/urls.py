@@ -8,6 +8,7 @@ from apps.users.api.views import (
     CompleteOnboardingView,
     MeView,
     ProfilePhotoView,
+    ReviewLoginView,
     SessionView,
 )
 
@@ -15,6 +16,7 @@ app_name = "users"
 
 urlpatterns = [
     path("auth/session", SessionView.as_view(), name="auth-session"),
+    path("auth/review-login", ReviewLoginView.as_view(), name="auth-review-login"),
     path("users/me", MeView.as_view(), name="users-me"),
     path(
         "users/me/profile-photo",

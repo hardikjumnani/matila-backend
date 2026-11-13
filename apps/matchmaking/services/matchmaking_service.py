@@ -144,6 +144,11 @@ class MatchmakingService:
             .filter(status=MatchQueueStatus.SEARCHING, intent=user.intent)
             .exclude(user_id=user.id)
         )
+        # Demo/review accounts are isolated: a demo account matches ONLY with
+        # other demo accounts, and a real account only with real accounts. The
+        # filter is mutual, so an App Store reviewer's demo account can never be
+        # paired with a real user (nor a real user with the demo). AI_BRIDGE [00079].
+        candidate_qs = candidate_qs.filter(user__is_demo=user.is_demo)
         # Never re-pair someone this user has already been matched with.
         past_ids = self._chats.past_partner_ids(user)
         if past_ids:
@@ -268,11 +273,14 @@ class MatchmakingService:
         return {"floor": floor, "label": f"{floor}+"}
 
     def _eligible_users(self):
-        """Verified, active, onboarded users (the 'real' population)."""
+        """Verified, active, onboarded users (the 'real' population). Demo/review
+        accounts are excluded so they never inflate any real-user-facing count
+        (lobby + intent social proof). AI_BRIDGE [00079]."""
         return User.objects.filter(
             verification_status=VerificationStatus.APPROVED,
             account_status=AccountStatus.ACTIVE,
             onboarding_completed_at__isnull=False,
+            is_demo=False,
         )
 
     def get_lobby_stats(self, user: User) -> dict:
@@ -281,9 +289,27 @@ class MatchmakingService:
         - compatible_online: online users this person can actually match with
           (same intent, mutual gender compatibility, not self, not already in a
           chat, and not a previous match partner)."""
-        total_online = self._presence.online_count()
-        online_ids = self._presence.online_ids()
-        online_ids.discard(str(user.id))
+        all_online = self._presence.online_ids()
+        # Keep only peers in the viewer's own cohort (real vs demo): a demo
+        # reviewer is never counted for real users, and vice versa. The viewer
+        # stays in their own cohort, so total_online still counts them (as before).
+        # AI_BRIDGE [00079].
+        if all_online:
+            demo_online = {
+                str(uid)
+                for uid in User.objects.filter(
+                    id__in=all_online, is_demo=True
+                ).values_list("id", flat=True)
+            }
+            cohort_online = (
+                (all_online & demo_online)
+                if user.is_demo
+                else (all_online - demo_online)
+            )
+        else:
+            cohort_online = all_online
+        total_online = len(cohort_online)
+        online_ids = cohort_online - {str(user.id)}
 
         compatible = 0
         if online_ids:

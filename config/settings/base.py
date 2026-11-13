@@ -282,6 +282,11 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.common.api.exception_handler.custom_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "apps.common.api.pagination.StandardCursorPagination",
     "PAGE_SIZE": 20,
+    # Per-view scoped throttles (opt-in via throttle_scope; no global throttle).
+    # review_login is the unauthenticated App Store reviewer bypass endpoint.
+    "DEFAULT_THROTTLE_RATES": {
+        "review_login": "10/min",
+    },
 }
 
 SPECTACULAR_SETTINGS = {
@@ -502,3 +507,17 @@ CSRF_TRUSTED_ORIGINS: list[str] = config("CSRF_TRUSTED_ORIGINS", default="", cas
 # accounts) and is sufficient at the single-college scale. Matching is
 # case-insensitive (see apps.admin_panel.permissions.IsAdminUser).
 ADMIN_EMAILS: list[str] = config("ADMIN_EMAILS", default="", cast=Csv())
+
+
+# ---------------------------------------------------------------------------
+# App Store reviewer bypass (AI_BRIDGE [00079])
+# ---------------------------------------------------------------------------
+# A single shared static code (kept in Apple's "App Review Information" notes)
+# that `POST /auth/review-login` exchanges for a Firebase custom token for an
+# isolated demo account, so reviewers get past college-email + launch gating.
+# The secret lives ONLY here (server-side), is rotatable by changing the env
+# value, and an EMPTY value disables the endpoint entirely (returns 403). The
+# demo account itself is created by `manage.py provision_review_account`.
+REVIEW_LOGIN_CODE: str = config("REVIEW_LOGIN_CODE", default="")
+REVIEW_DEMO_UID: str = config("REVIEW_DEMO_UID", default="matila-review-demo")
+REVIEW_DEMO_EMAIL: str = config("REVIEW_DEMO_EMAIL", default="appreview@matila.demo")

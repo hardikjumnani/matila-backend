@@ -110,6 +110,13 @@ class User(TimeStampedUUIDModel):
     # set on successful reveal execution, never unset.
     has_completed_reveal = models.BooleanField(default=False)
 
+    # Isolated demo/review account (App Store review bypass; AI_BRIDGE [00079]).
+    # A demo account matches ONLY with other demo accounts and is excluded from
+    # the real matching pool and every real-user-facing count, so an App Review
+    # reviewer can exercise the app end-to-end without ever touching real users.
+    # Set only by the provision_review_account command; never by a normal sign-up.
+    is_demo = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         db_table = "users"
         indexes = [

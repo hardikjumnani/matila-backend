@@ -11,12 +11,13 @@ creates a new attempt rather than mutating a prior one.
 
 from __future__ import annotations
 
+import io
 import logging
 import secrets
 from typing import Any, BinaryIO
 
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from apps.audit.enums import ActorType
@@ -78,6 +79,43 @@ class VerificationService:
 
     def get_history(self, user: User):
         return VerificationRequest.objects.filter(user=user).order_by("-attempt_number")
+
+    def find_selfie_duplicates(self, request: VerificationRequest) -> list[dict]:
+        """Other users whose gesture selfie matches this request's (same photo
+        reused across accounts). Exact (sha256) or perceptual (phash) equality;
+        report-only. Near-duplicate Hamming search is a later enhancement."""
+        sha = request.selfie_sha256 or ""
+        phash = request.selfie_phash or ""
+        # A flat/near-flat image yields a degenerate hash (all 0s / all fs) that
+        # would "match" every other flat image; ignore it for perceptual matching
+        # (exact sha still applies).
+        if phash in ("0000000000000000", "ffffffffffffffff"):
+            phash = ""
+        condition = Q()
+        if sha:
+            condition |= Q(selfie_sha256=sha)
+        if phash:
+            condition |= Q(selfie_phash=phash)
+        if not condition:
+            return []
+        rows = (
+            VerificationRequest.objects.exclude(user_id=request.user_id)
+            .filter(condition)
+            .values("id", "user_id", "selfie_sha256", "selfie_phash")
+            .order_by("-created_at")
+        )
+        matches: list[dict] = []
+        seen: set[str] = set()
+        for row in rows:
+            uid = str(row["user_id"])
+            if uid in seen:
+                continue
+            seen.add(uid)
+            kind = "exact" if sha and row["selfie_sha256"] == sha else "perceptual"
+            matches.append(
+                {"user_id": uid, "attempt_id": str(row["id"]), "kind": kind}
+            )
+        return matches
 
     def has_submitted_request(self, user: User) -> bool:
         """Whether the user has ever submitted a request for review."""
@@ -211,11 +249,77 @@ class VerificationService:
         if draft_result.failed:
             return draft_result
         draft = draft_result.data
+
+        # Read the bytes once so we can both store the object and run the
+        # report-only forensic pass. Forensics must NEVER block an upload.
+        data = self._read_all(fileobj)
         key = self._storage.build_key(prefix, filename)
-        self._storage.upload_fileobj(fileobj, key, content_type=content_type)
+        self._storage.upload_fileobj(
+            io.BytesIO(data), key, content_type=content_type
+        )
+
+        update_fields = [field, "updated_at"]
         setattr(draft, field, key)
-        draft.save(update_fields=[field, "updated_at"])
+        self._attach_forensics(
+            draft,
+            data=data,
+            field=field,
+            content_type=content_type,
+            filename=filename,
+            update_fields=update_fields,
+        )
+        draft.save(update_fields=update_fields)
         return ServiceResult.ok(draft)
+
+    @staticmethod
+    def _read_all(fileobj: BinaryIO) -> bytes:
+        """Read an uploaded file fully into memory (verification images are small)."""
+        try:
+            fileobj.seek(0)
+        except Exception:  # noqa: BLE001 — not all streams are seekable.
+            pass
+        data = fileobj.read()
+        if isinstance(data, str):
+            data = data.encode("utf-8", "replace")
+        return data or b""
+
+    def _attach_forensics(
+        self,
+        draft: VerificationRequest,
+        *,
+        data: bytes,
+        field: str,
+        content_type: str,
+        filename: str,
+        update_fields: list[str],
+    ) -> None:
+        """Compute + attach the image forensic report. Best-effort: any failure is
+        logged and skipped so the upload still succeeds."""
+        try:
+            from apps.verification.services.image_forensics import analyze_image
+
+            report = analyze_image(
+                data,
+                declared_content_type=content_type,
+                filename=filename,
+                reference_time=draft.created_at,
+            )
+        except Exception as exc:  # noqa: BLE001 — forensics is report-only.
+            logger.warning("Forensics failed for request %s: %s", draft.id, exc)
+            return
+
+        if field == "gesture_selfie_image_url":
+            draft.gesture_selfie_forensics = report
+            draft.selfie_sha256 = report.get("sha256", "")
+            draft.selfie_phash = report.get("phash", "")
+            update_fields += [
+                "gesture_selfie_forensics",
+                "selfie_sha256",
+                "selfie_phash",
+            ]
+        elif field == "college_id_image_url":
+            draft.college_id_forensics = report
+            update_fields.append("college_id_forensics")
 
     @transaction.atomic
     def submit(self, user: User) -> ServiceResult[VerificationRequest]:

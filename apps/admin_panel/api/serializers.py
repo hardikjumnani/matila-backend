@@ -25,6 +25,13 @@ from apps.users.models import User
 from apps.verification.models import VerificationRequest
 
 
+def _public_forensics(rep) -> dict:
+    """Admin-facing slice of a stored forensic report: the verdict + signals, with
+    the raw hashes kept server-side (not needed by the panel)."""
+    rep = rep if isinstance(rep, dict) else {}
+    return {"overall": rep.get("overall", "ok"), "signals": rep.get("signals", [])}
+
+
 class AdminVerificationRequestSerializer(serializers.ModelSerializer):
     """Verification request with signed document URLs for review."""
 
@@ -36,6 +43,12 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
     # gesture_type for back-compat). Falls back gracefully for historical codes no
     # longer in the pool, so old attempts still render.
     gesture = serializers.SerializerMethodField()
+    # Report-only image forensics, shown on EVERY verification (any status).
+    # forensics_overall is a cheap badge (from stored JSON); forensics is the full
+    # per-image report rendered below the image. Duplicate detection (a live query)
+    # is added only on the detail view to keep the list cheap. AI_BRIDGE / EXTERNAL.
+    forensics_overall = serializers.SerializerMethodField()
+    forensics = serializers.SerializerMethodField()
 
     class Meta:
         model = VerificationRequest
@@ -53,6 +66,8 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
             "submitted_at",
             "reviewed_at",
             "created_at",
+            "forensics_overall",
+            "forensics",
         ]
         read_only_fields = fields
 
@@ -68,6 +83,20 @@ class AdminVerificationRequestSerializer(serializers.ModelSerializer):
         )
 
         return ConfigurationService().get_gesture(obj.gesture_type)
+
+    def get_forensics_overall(self, obj: VerificationRequest) -> str:
+        for rep in (obj.gesture_selfie_forensics, obj.college_id_forensics):
+            if isinstance(rep, dict) and rep.get("overall") == "attention":
+                return "attention"
+        return "ok"
+
+    def get_forensics(self, obj: VerificationRequest) -> dict:
+        return {
+            "overall": self.get_forensics_overall(obj),
+            "selfie": _public_forensics(obj.gesture_selfie_forensics),
+            "college_id": _public_forensics(obj.college_id_forensics),
+            "duplicates": [],
+        }
 
 
 class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
@@ -93,6 +122,17 @@ class AdminVerificationDetailSerializer(AdminVerificationRequestSerializer):
 
     def get_profile_photo_url(self, obj: VerificationRequest) -> str:
         return resolve_media_url(obj.user.profile_photo_url)
+
+    def get_forensics(self, obj: VerificationRequest) -> dict:
+        # Detail view adds the one live signal: cross-user selfie reuse.
+        from apps.verification.services.verification_service import VerificationService
+
+        report = super().get_forensics(obj)
+        duplicates = VerificationService().find_selfie_duplicates(obj)
+        report["duplicates"] = duplicates
+        if duplicates:
+            report["overall"] = "attention"
+        return report
 
 
 class ReviewActionSerializer(serializers.Serializer):

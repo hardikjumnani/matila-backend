@@ -51,6 +51,17 @@ class VerificationRequest(TimeStampedUUIDModel):
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
+    # --- Image forensics (report-only; never blocks a submission) -----------
+    # Per-image triage reports computed at upload time (see image_forensics).
+    # Each is a dict: {overall, sha256, phash, signals: [...]}. Surfaced to admins
+    # on every verification (any status) alongside the image. AI_BRIDGE / EXTERNAL.
+    gesture_selfie_forensics = models.JSONField(default=dict, blank=True)
+    college_id_forensics = models.JSONField(default=dict, blank=True)
+    # Indexed hashes of the gesture selfie for cross-user reuse detection (the same
+    # photo farmed across accounts). sha256 = exact, phash = perceptual (near) match.
+    selfie_sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    selfie_phash = models.CharField(max_length=16, blank=True, default="", db_index=True)
+
     class Meta:
         db_table = "verification_requests"
         constraints = [

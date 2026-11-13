@@ -45,6 +45,11 @@ django-cors-headers==4.6.0
 # API schema / documentation
 drf-spectacular==0.28.0
 
+# Image handling for verification forensics (decode-validate uploads, read EXIF,
+# embedded thumbnail, dimensions; compute perceptual hashes). Report-only; never
+# blocks an upload. Used by apps/verification/services/image_forensics.py.
+Pillow==12.3.0
+
 # Privacy / anti-leakage engine (Veil). Deterministic, no AI, no external API.
 # phonenumbers: libphonenumber port for accurate phone detection (intl + fewer
 #   false positives than a bare regex). pyahocorasick: C multi-pattern matcher
